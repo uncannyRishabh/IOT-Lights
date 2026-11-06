@@ -1,0 +1,41 @@
+# rustuya-core — sans-I/O, no_std + alloc core for the Tuya local protocol.
+# Part of the 0.4 clean-slate redesign (see MILESTONES.md). No tokio, no std,
+# no sockets/timers: protocol + crypto + the Device/Discovery state machines,
+# with `now` and the RNG injected by the driver. A member of the root workspace.
+[package]
+name = "rustuya-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Sans-I/O no_std core for the Tuya local protocol (protocol, crypto, state machines)"
+repository.workspace = true
+readme.workspace = true
+
+[lib]
+name = "rustuya_core"
+
+[features]
+default = []
+
+# Minimal, no_std-only dependencies (design invariant 7). Crypto is RustCrypto
+# with default-features off; nothing here pulls std.
+[dependencies]
+aes = { version = "0.9", default-features = false, features = ["zeroize"] }
+aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc", "zeroize"] }
+cipher = { version = "0.5", default-features = false }
+ecb = { version = "0.2", default-features = false }
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
+crc = { version = "3.4", default-features = false }
+hmac = { version = "0.13", default-features = false }
+sha2 = { version = "0.11", default-features = false }
+md-5 = { version = "0.11", default-features = false }
+# Rng trait only — the RNG itself is injected by the driver (never called
+# from the core). The tokio driver passes rand::rng(); tests pass a seeded RNG.
+rand_core = { version = "0.10", default-features = false }
+# JSON seam (D8): the only non-crypto, non-trivial dep. no_std + alloc; kept
+# behind `src/json.rs` so it can be swapped without touching the byte core.
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+# Best-effort wiping of key material on drop (local key, session key, cipher key
+# schedules). no_std + alloc; RustCrypto already speaks it.
+zeroize = { version = "1", default-features = false, features = ["alloc"] }

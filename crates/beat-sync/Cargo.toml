@@ -1,0 +1,26 @@
+[package]
+name = "beat-sync"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Real-time music beat-synchronization DSP engine, lighting choreography, and bulb fleet controller"
+
+[dependencies]
+tuya-bulb = { workspace = true }
+rustuya-tokio = { workspace = true }
+rustuya-core = { workspace = true }
+cpal = "0.15"
+ringbuf = "0.4"
+realfft = "3.4"
+num-complex = "0.4"
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+futures = "0.3"
+
+[dev-dependencies]
+tokio = { workspace = true }

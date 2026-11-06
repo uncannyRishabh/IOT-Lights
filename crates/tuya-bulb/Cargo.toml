@@ -1,0 +1,19 @@
+[package]
+name = "tuya-bulb"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "High-level Tuya smart bulb control and DPS formatting (Type A & Type B, HSV/RGB, DP27 music streaming)"
+
+[dependencies]
+rustuya-core = { workspace = true }
+rustuya-tokio = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

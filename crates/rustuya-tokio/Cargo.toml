@@ -1,0 +1,51 @@
+# rustuya-tokio — the std + tokio *driver* over the sans-I/O `rustuya-core` FSM.
+#
+# This is the M1.5 deliverable of the 0.4 sans-I/O program (see ../MILESTONES.md):
+# a thin driver that owns *only* I/O — TCP sockets, one `sleep` timer, the RNG,
+# and the monotonic clock — and delegates every protocol/lifecycle *decision*
+# (handshake, backoff, heartbeat, idle-liveness, frame reassembly) to the pure
+# `rustuya-core` Device FSM. Written from scratch on the FSM. A member of the
+# root workspace (alongside rustuya-core).
+[package]
+name = "rustuya-tokio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Tokio driver for the sans-I/O rustuya-core Tuya protocol FSM"
+repository.workspace = true
+readme.workspace = true
+
+[lib]
+name = "rustuya_tokio"
+
+[dependencies]
+rustuya-core = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "io-util"] }
+# BroadcastStream, so `listener()` is a `Stream` (README `.next().await` idiom).
+tokio-stream = { version = "0.1", features = ["sync"] }
+# UDP discovery sockets: SO_REUSEADDR/REUSEPORT + SO_BROADCAST so the scanner can
+# share the well-known ports and send broadcasts.
+socket2 = { version = "0.6", features = ["all"] }
+# The RNG the core never generates itself: a Send CSPRNG (ChaCha), OS-seeded,
+# injected into every handle_input/handle_timeout so IVs/nonces stay unique.
+rand = "0.10"
+serde = "1"
+serde_json = "1"
+log = "0.4"
+# Wipe the local key on drop (the builder holds it until `connect`).
+zeroize = "1"
+# Enumerate local interfaces: the fallback for picking discovery probe sources
+# when the default-route trick finds nothing (an isolated LAN with no gateway).
+if-addrs = "0.15"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "io-util"] }
+# For crafting a v3.4 SessKeyNegResp in the handshake loopback test (same
+# versions as rustuya-core, so no duplicate in the tree).
+hmac = "0.13"
+sha2 = "0.11"
+# The `real_device` example installs a logger so the driver's internal
+# log::{debug,warn} (probe sends, route pruning, listener lag) surface under
+# RUST_LOG. Example-only; not a library dependency.
+env_logger = "0.11"

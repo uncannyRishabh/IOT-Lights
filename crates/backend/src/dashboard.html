@@ -1,0 +1,1377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>IOT-Lights | Audio Beat Sync Studio</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    :root {
+      --bg: #05070d;
+      --card-bg: rgba(9, 13, 23, 0.65);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --card-hover: rgba(20, 27, 46, 0.80);
+      --accent: #00f0ff;
+      --accent-glow: rgba(0, 240, 255, 0.40);
+      --pink: #ff007f;
+      --pink-glow: rgba(255, 0, 127, 0.40);
+      --amber: #ffaa00;
+      --text: #f0f4fc;
+      --text-muted: #8e9db7;
+      --success: #00ff88;
+      --danger: #ff4757;
+      --live-glow: rgba(0, 240, 255, 0.15);
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: var(--font); -webkit-tap-highlight-color: transparent; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+      position: relative;
+    }
+    #threeCanvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 0;
+      pointer-events: none;
+    }
+    .container {
+      position: relative;
+      z-index: 10;
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px 20px 120px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, var(--accent), var(--pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .brand svg { stroke: var(--accent); fill: none; }
+    .header-actions { display: flex; gap: 10px; align-items: center; }
+
+    /* Floating HUD Telemetry Strip */
+    .hud-strip {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      background: rgba(8, 12, 22, 0.70);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 10px 16px;
+      margin-bottom: 24px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+      flex-wrap: wrap;
+    }
+    .hud-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--card-border);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+      transition: all 0.12s ease-out;
+    }
+    .hud-pill-val { font-size: 13px; font-weight: 800; color: var(--text); }
+    .hud-pill.active-kick {
+      background: rgba(255, 0, 127, 0.25);
+      border-color: var(--pink);
+      color: #fff;
+      box-shadow: 0 0 14px var(--pink-glow);
+      transform: scale(1.05);
+    }
+    .hud-pill.active-kick .hud-pill-val { color: var(--pink); }
+    .hud-pill.active-snare {
+      background: rgba(0, 240, 255, 0.25);
+      border-color: var(--accent);
+      color: #fff;
+      box-shadow: 0 0 14px var(--accent-glow);
+      transform: scale(1.05);
+    }
+    .hud-pill.active-snare .hud-pill-val { color: var(--accent); }
+    .hud-color-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent-glow);
+      transition: background 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    /* Glass Cards */
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 860px) { .grid { grid-template-columns: 1fr; gap: 16px; } }
+    .card {
+      background: var(--card-bg);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border: 1px solid var(--card-border);
+      border-radius: 18px;
+      padding: 22px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 20px var(--live-glow);
+      transition: border-color 0.25s, box-shadow 0.25s;
+    }
+    .card:hover { border-color: rgba(255, 255, 255, 0.16); }
+    .card-title {
+      font-size: 15px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    .card-title-left { display: flex; align-items: center; gap: 8px; color: var(--accent); }
+    .card-title-left svg { stroke: var(--accent); }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 44px;
+      padding: 0 18px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.15s ease-out;
+      user-select: none;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), #00b4d8);
+      color: #05070d;
+      box-shadow: 0 4px 16px var(--accent-glow);
+      font-weight: 700;
+    }
+    .btn-stop {
+      background: linear-gradient(135deg, var(--pink), #d90429);
+      color: #fff;
+      box-shadow: 0 4px 16px var(--pink-glow);
+      font-weight: 700;
+    }
+    .btn-ghost {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+    }
+    .btn-ghost:hover { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.15); }
+    .btn-sm { min-height: 36px; padding: 0 12px; font-size: 13px; border-radius: 8px; }
+    .btn-icon { width: 44px; min-height: 44px; padding: 0; }
+    .btn-icon.btn-sm { width: 36px; min-height: 36px; }
+
+    /* Form Controls */
+    .form-group { margin-bottom: 16px; }
+    label { display: block; font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+    select, input {
+      width: 100%;
+      min-height: 44px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      padding: 0 14px;
+      border-radius: 10px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    select:focus, input:focus { border-color: var(--accent); }
+    select option { background: #0c111e; color: #fff; }
+
+    /* Segmented Controls (Ambience Mode) */
+    .segmented-control {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.04);
+      padding: 4px;
+      border-radius: 12px;
+      border: 1px solid var(--card-border);
+      margin-bottom: 16px;
+    }
+    .segmented-btn {
+      padding: 10px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .segmented-btn.active {
+      background: rgba(0, 240, 255, 0.15);
+      border: 1px solid var(--accent);
+      color: #fff;
+      box-shadow: 0 2px 10px var(--accent-glow);
+    }
+
+    /* Range Sliders */
+    .slider-container {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .slider-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .slider-val { color: var(--accent); font-weight: 700; }
+    input[type=range] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      outline: none;
+      padding: 0;
+      border: none;
+      cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent-glow);
+      cursor: pointer;
+      transition: transform 0.1s;
+    }
+    input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+    .preset-chips { display: flex; gap: 8px; margin-top: 4px; }
+    .chip {
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .chip:hover { background: rgba(0, 240, 255, 0.15); color: var(--accent); border-color: var(--accent); }
+
+    /* Switch Toggles */
+    .toggle-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-top: 1px solid var(--card-border);
+    }
+    .toggle-meta { display: flex; flex-direction: column; gap: 2px; }
+    .toggle-title { font-size: 13px; font-weight: 700; color: var(--text); }
+    .toggle-desc { font-size: 11px; color: var(--text-muted); }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 48px;
+      height: 26px;
+      flex-shrink: 0;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: rgba(255, 255, 255, 0.1);
+      border: 1px solid var(--card-border);
+      border-radius: 26px;
+      transition: .2s;
+    }
+    .switch-slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      border-radius: 50%;
+      transition: .2s;
+    }
+    .switch input:checked + .switch-slider {
+      background-color: var(--accent);
+      border-color: var(--accent);
+      box-shadow: 0 0 10px var(--accent-glow);
+    }
+    .switch input:checked + .switch-slider:before {
+      transform: translateX(22px);
+      background-color: #05070d;
+    }
+
+    /* Bulb Fleet Item (Two-Row Ergonomic Wrap) */
+    .bulb-item {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      padding: 14px 16px;
+      border-radius: 14px;
+      margin-bottom: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: border-color 0.2s;
+    }
+    .bulb-item:hover { border-color: rgba(255, 255, 255, 0.14); }
+    .bulb-row-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .bulb-meta-title {
+      font-size: 15px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      word-break: break-all;
+    }
+    .bulb-row-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .bulb-info-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .bulb-sub-badge {
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-muted);
+    }
+    .bulb-actions-wrap {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .status-dot {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 20px;
+    }
+    .status-online { background: rgba(0, 255, 136, 0.15); color: var(--success); }
+    .status-offline { background: rgba(255, 71, 87, 0.15); color: var(--danger); }
+    .color-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      cursor: pointer;
+      transition: transform 0.1s;
+    }
+    .color-btn:hover { transform: scale(1.15); }
+
+    /* Collapsible Accordion for Connect New Bulb */
+    .accordion-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s;
+    }
+    .accordion-header:hover { background: rgba(255, 255, 255, 0.06); }
+    .accordion-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; }
+    .accordion-body {
+      display: none;
+      padding: 16px 0 0;
+      gap: 12px;
+    }
+    .accordion-body.open { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+
+    /* Discovered devices drawer */
+    .discovered-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(0, 240, 255, 0.05);
+      border: 1px dashed rgba(0, 240, 255, 0.3);
+      padding: 10px 14px;
+      border-radius: 10px;
+      margin-top: 8px;
+      font-size: 13px;
+    }
+
+    /* Mobile Sticky Bottom Bar */
+    .mobile-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(8, 12, 22, 0.90);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-top: 1px solid var(--card-border);
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 100;
+    }
+    .mobile-bar-info { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
+    .pulse-indicator {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      transition: all 0.1s ease;
+    }
+
+    /* Mobile Viewport Reconciliations */
+    @media (max-width: 860px) {
+      .header-actions { display: none; } /* Reconcile duplicate button: mobile bar handles it */
+    }
+    @media (min-width: 861px) {
+      .mobile-bar { display: none; }
+      .container { padding-bottom: 40px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Full-Viewport 3D Three.js WebGL Scene -->
+  <canvas id="threeCanvas"></canvas>
+
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <svg width="24" height="24" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <span>IOT-Lights Studio</span>
+      </div>
+      <div class="header-actions">
+        <button id="mainSyncBtn" class="btn btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <span id="mainSyncLabel">Start Beat Sync</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Translucent Floating HUD Telemetry Strip -->
+    <div class="hud-strip">
+      <div class="hud-pill" id="hudFpsPill">
+        <span>FPS</span>
+        <span class="hud-pill-val" id="fpsVal">60</span>
+      </div>
+      <div class="hud-pill" id="hudKickPill">
+        <span>KICK</span>
+        <span class="hud-pill-val" id="kickVal">-</span>
+      </div>
+      <div class="hud-pill" id="hudSnarePill">
+        <span>SNARE</span>
+        <span class="hud-pill-val" id="snareVal">-</span>
+      </div>
+      <div class="hud-pill">
+        <span>BASS</span>
+        <span class="hud-pill-val" id="bassVal">0%</span>
+      </div>
+      <div class="hud-pill">
+        <span>ENERGY</span>
+        <span class="hud-pill-val" id="energyVal">0%</span>
+      </div>
+      <div class="hud-pill">
+        <span>AGC GAIN</span>
+        <span class="hud-pill-val" id="agcVal">1.0x</span>
+      </div>
+      <div class="hud-pill" style="margin-left:auto;">
+        <div id="liveColorDot" class="hud-color-dot"></div>
+        <span class="hud-pill-val" id="hexVal">#00F0FF</span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- Sync Engine Card -->
+      <section class="card">
+        <div class="card-title">
+          <div class="card-title-left">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+            <span>Sync Engine</span>
+          </div>
+        </div>
+
+        <!-- Audio Capture Selection -->
+        <div class="form-group">
+          <label>Audio Capture Input</label>
+          <div style="display:flex; gap:8px;">
+            <select id="audioSelect"></select>
+            <button id="refreshAudioBtn" class="btn btn-ghost btn-icon" title="Refresh audio devices">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Lighting Palette -->
+        <div class="form-group">
+          <label>Lighting Palette</label>
+          <select id="paletteSelect">
+            <option value="Cyberpunk">Cyberpunk Neon (Cyan & Magenta)</option>
+            <option value="Synthwave">Synthwave Sunset (Warm Orange & Violet)</option>
+            <option value="ClubRave">Club Rave (High-Contrast Strobe Hits)</option>
+            <option value="Vaporwave">Vaporwave Pastel (Soft Mint & Pink)</option>
+            <option value="AmbientChill">Ambient Chill (Deep Indigo & Teal)</option>
+          </select>
+        </div>
+
+        <!-- Master Bulb Brightness Slider -->
+        <div class="slider-container">
+          <div class="slider-header">
+            <span>Master Bulb Brightness</span>
+            <span id="masterBrightnessVal" class="slider-val">100%</span>
+          </div>
+          <input type="range" id="masterBrightnessSlider" min="1" max="100" value="100">
+          <div class="preset-chips">
+            <button class="chip" onclick="setMasterBrightness(25)">25%</button>
+            <button class="chip" onclick="setMasterBrightness(50)">50%</button>
+            <button class="chip" onclick="setMasterBrightness(75)">75%</button>
+            <button class="chip" onclick="setMasterBrightness(100)">100%</button>
+          </div>
+        </div>
+
+        <!-- Bulb Ambience Mode (Club Dark vs Room Light) -->
+        <div class="form-group" style="margin-top:14px;">
+          <label>Bulb Ambience Mode (Physical Lights & 3D Floor)</label>
+          <div class="segmented-control">
+            <button id="ambienceDarkBtn" class="segmented-btn active" onclick="setAmbienceMode('DarkMode')">
+              <span>🌑 Dark (Club Strobe)</span>
+            </button>
+            <button id="ambienceLightBtn" class="segmented-btn" onclick="setAmbienceMode('LightMode')">
+              <span>💡 Light (Room Fill)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Auto-Normalize Volume (AGC) Toggle -->
+        <div class="toggle-row">
+          <div class="toggle-meta">
+            <div class="toggle-title">Auto-Normalize Volume (AGC)</div>
+            <div class="toggle-desc">Anti-pegging compression keeps transients sharp on loud tracks</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="agcToggle" checked onchange="toggleAgc(this.checked)">
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+
+        <!-- Smooth Color Transitions Toggle -->
+        <div class="toggle-row">
+          <div class="toggle-meta">
+            <div class="toggle-title">Smooth Transitions (Gradual LERP)</div>
+            <div class="toggle-desc">Interpolates colors via shortest-arc HSL; avoids strobe seizures</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="smoothToggle" checked onchange="toggleSmooth(this.checked)">
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+
+        <!-- Broadcast Fleet Controls -->
+        <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--card-border);">
+          <label>Broadcast Fleet Controls</label>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button onclick="broadcastPower(true)" class="btn btn-ghost btn-sm">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+              <span>All ON</span>
+            </button>
+            <button onclick="broadcastPower(false)" class="btn btn-ghost btn-sm">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+              <span>All OFF</span>
+            </button>
+            <button onclick="broadcastWhite(900, 500)" class="btn btn-ghost btn-sm">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+              <span>All White</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Connected Bulbs Card -->
+      <section class="card">
+        <div class="card-title">
+          <div class="card-title-left">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>
+            <span>Bulb Fleet</span>
+          </div>
+          <button id="scanLanBtn" class="btn btn-ghost btn-sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>
+            <span>Scan Network</span>
+          </button>
+        </div>
+
+        <!-- Discovered devices -->
+        <div id="discoveredList" style="margin-bottom:12px; display:none;"></div>
+
+        <!-- Connected bulb items -->
+        <div id="bulbList"></div>
+
+        <!-- Collapsible Connect New Bulb Accordion -->
+        <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--card-border);">
+          <div class="accordion-header" onclick="toggleAddBulbAccordion()">
+            <div class="accordion-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <span>Connect New Bulb</span>
+            </div>
+            <svg id="accordionChevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.2s;"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+          <div id="addBulbBody" class="accordion-body">
+            <input id="newId" placeholder="Device ID (22 chars)" autocomplete="off">
+            <input id="newKey" placeholder="Local Key (16 chars)" autocomplete="off">
+            <input id="newIp" placeholder="Local IP (e.g. 192.168.1.50)" autocomplete="off">
+            <select id="newType">
+              <option value="TypeB">Type B (Modern 20-27 / Wipro / Syska)</option>
+              <option value="TypeA">Type A (Legacy 1-5)</option>
+            </select>
+            <select id="newVersion">
+              <option value="3.5" selected>Protocol v3.5 (Modern)</option>
+              <option value="3.3">Protocol v3.3</option>
+              <option value="3.4">Protocol v3.4</option>
+              <option value="3.1">Protocol v3.1</option>
+            </select>
+            <button id="addBulbBtn" class="btn btn-primary" style="grid-column: 1 / -1;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <span>Add to Fleet</span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Mobile sticky bottom bar -->
+  <aside class="mobile-bar">
+    <div class="mobile-bar-info">
+      <div id="mobilePulseDot" class="pulse-indicator"></div>
+      <span id="mobileStatusText">Beat Sync Inactive</span>
+    </div>
+    <button id="mobileSyncBtn" class="btn btn-primary btn-sm">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      <span>Sync</span>
+    </button>
+  </aside>
+
+  <script>
+    // Global State
+    let isSyncing = false;
+    let syncSettings = {
+      palette: 'Cyberpunk',
+      ambience_mode: 'DarkMode',
+      master_brightness: 1.0,
+      smooth_transitions: true,
+      auto_normalize: true,
+      audio_device: null
+    };
+
+    let telemetry = {
+      is_kick: false,
+      is_snare: false,
+      bass_intensity: 0,
+      snare_intensity: 0,
+      overall_energy: 0,
+      active_hue: 180,
+      active_brightness: 500,
+      active_rgb: [0, 240, 255],
+      agc_gain: 1.0
+    };
+
+    // Palettes for idle mode breathing
+    const PALETTE_HUES = {
+      'Cyberpunk': [180, 300, 270, 210, 330],
+      'Synthwave': [25, 330, 280, 45, 310],
+      'ClubRave': [0, 120, 240, 60, 180, 300],
+      'Vaporwave': [320, 180, 260, 30, 200],
+      'AmbientChill': [140, 200, 40, 170, 220]
+    };
+
+    // DOM Elements
+    const mainSyncBtn = document.getElementById('mainSyncBtn');
+    const mainSyncLabel = document.getElementById('mainSyncLabel');
+    const mobileSyncBtn = document.getElementById('mobileSyncBtn');
+    const mobileStatusText = document.getElementById('mobileStatusText');
+    const mobilePulseDot = document.getElementById('mobilePulseDot');
+    const audioSelect = document.getElementById('audioSelect');
+    const paletteSelect = document.getElementById('paletteSelect');
+    const masterBrightnessSlider = document.getElementById('masterBrightnessSlider');
+    const masterBrightnessVal = document.getElementById('masterBrightnessVal');
+    const ambienceDarkBtn = document.getElementById('ambienceDarkBtn');
+    const ambienceLightBtn = document.getElementById('ambienceLightBtn');
+    const agcToggle = document.getElementById('agcToggle');
+    const smoothToggle = document.getElementById('smoothToggle');
+    const bulbList = document.getElementById('bulbList');
+    const discoveredList = document.getElementById('discoveredList');
+    const scanLanBtn = document.getElementById('scanLanBtn');
+
+    // HUD Elements
+    const hudKickPill = document.getElementById('hudKickPill');
+    const hudSnarePill = document.getElementById('hudSnarePill');
+    const kickVal = document.getElementById('kickVal');
+    const snareVal = document.getElementById('snareVal');
+    const bassVal = document.getElementById('bassVal');
+    const energyVal = document.getElementById('energyVal');
+    const agcVal = document.getElementById('agcVal');
+    const fpsVal = document.getElementById('fpsVal');
+    const hexVal = document.getElementById('hexVal');
+    const liveColorDot = document.getElementById('liveColorDot');
+
+    // Accordion toggle
+    function toggleAddBulbAccordion() {
+      const body = document.getElementById('addBulbBody');
+      const chevron = document.getElementById('accordionChevron');
+      if (body.classList.contains('open')) {
+        body.classList.remove('open');
+        chevron.style.transform = 'rotate(0deg)';
+      } else {
+        body.classList.add('open');
+        chevron.style.transform = 'rotate(180deg)';
+      }
+    }
+
+    // Three.js Full-Viewport 3D Background Visualizer
+    const canvas = document.getElementById('threeCanvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
+    const isMobile = window.innerWidth < 768;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, -18, 14);
+    camera.rotation.x = 0.95;
+
+    // Lighting setup
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.20);
+    scene.add(ambientLight);
+
+    const primaryLight = new THREE.PointLight(0x00f0ff, 3.0, 100);
+    primaryLight.position.set(0, 5, 12);
+    scene.add(primaryLight);
+
+    const secondaryLight = new THREE.PointLight(0xff007f, 2.0, 90);
+    secondaryLight.position.set(0, -20, 8);
+    scene.add(secondaryLight);
+
+    // Procedural Undulating Terrain Plane
+    const segs = isMobile ? 36 : 64;
+    const terrainGeo = new THREE.PlaneGeometry(80, 80, segs, segs);
+    const terrainMat = new THREE.MeshStandardMaterial({
+      color: 0x00f0ff,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.70,
+      roughness: 0.25,
+      metalness: 0.8
+    });
+    const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
+    scene.add(terrainMesh);
+
+    // Sub-surface dark water bed beneath the wireframe
+    const bedMat = new THREE.MeshBasicMaterial({ color: 0x03050a, transparent: true, opacity: 0.85 });
+    const bedMesh = new THREE.Mesh(terrainGeo, bedMat);
+    bedMesh.position.z = -0.5;
+    scene.add(bedMesh);
+
+    // Particle Constellation Field
+    const particleCount = isMobile ? 700 : 1800;
+    const particleGeo = new THREE.BufferGeometry();
+    const particlePositions = new Float32Array(particleCount * 3);
+    const particleVelocities = [];
+
+    for (let i = 0; i < particleCount; i++) {
+      particlePositions[i * 3] = (Math.random() - 0.5) * 80;
+      particlePositions[i * 3 + 1] = (Math.random() - 0.5) * 80;
+      particlePositions[i * 3 + 2] = Math.random() * 25 - 2;
+      particleVelocities.push({
+        x: (Math.random() - 0.5) * 0.02,
+        y: (Math.random() - 0.5) * 0.02,
+        z: Math.random() * 0.03 + 0.01
+      });
+    }
+    particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+
+    const particleMat = new THREE.PointsMaterial({
+      color: 0x00f0ff,
+      size: isMobile ? 0.35 : 0.45,
+      transparent: true,
+      opacity: 0.65,
+      blending: THREE.AdditiveBlending
+    });
+    const particleSystem = new THREE.Points(particleGeo, particleMat);
+    scene.add(particleSystem);
+
+    // Shockwave ripple physics
+    let shockwaveRadius = 0;
+    let shockwaveSpeed = 0;
+    let shockwaveIntensity = 0;
+    let targetCameraFov = 60;
+
+    // Handle Resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // FPS Measurement
+    let frameCount = 0;
+    let lastFpsTime = performance.now();
+
+    // Visualizer Render Loop
+    const clock = new THREE.Clock();
+
+    function render3D() {
+      if (document.hidden) {
+        requestAnimationFrame(render3D);
+        return;
+      }
+
+      const elapsed = clock.getElapsedTime();
+      frameCount++;
+      const now = performance.now();
+      if (now - lastFpsTime >= 1000) {
+        fpsVal.innerText = frameCount;
+        frameCount = 0;
+        lastFpsTime = now;
+      }
+
+      // Calculate Target Colors & Ambient Levels
+      let currentColor = new THREE.Color(0x00f0ff);
+      if (isSyncing) {
+        const [r, g, b] = telemetry.active_rgb;
+        currentColor.setRGB(r / 255, g / 255, b / 255);
+      } else {
+        // Idle breathing: harmonic cycle through active palette
+        const hues = PALETTE_HUES[syncSettings.palette] || PALETTE_HUES['Cyberpunk'];
+        const idleHueIdx = Math.floor((elapsed * 0.25) % hues.length);
+        const nextHueIdx = (idleHueIdx + 1) % hues.length;
+        const frac = (elapsed * 0.25) % 1;
+        const blendedHue = hues[idleHueIdx] + (hues[nextHueIdx] - hues[idleHueIdx]) * frac;
+        currentColor.setHSL(blendedHue / 360, 0.95, 0.55);
+      }
+
+      // Update Three.js Materials & Lights
+      terrainMat.color.lerp(currentColor, 0.15);
+      particleMat.color.lerp(currentColor, 0.15);
+      primaryLight.color.lerp(currentColor, 0.15);
+
+      // Complementary Rim Light
+      const compColor = currentColor.clone().offsetHSL(0.5, 0, 0);
+      secondaryLight.color.lerp(compColor, 0.15);
+
+      // Ambient Light based on Bulb Ambience Mode
+      const targetAmbient = (syncSettings.ambience_mode === 'LightMode') ? 0.65 : 0.20;
+      ambientLight.intensity += (targetAmbient - ambientLight.intensity) * 0.05;
+
+      // Primary Light Pulse on Kicks
+      const targetPrimaryInt = isSyncing ? (2.0 + telemetry.bass_intensity * 4.0) : 1.5;
+      primaryLight.intensity += (targetPrimaryInt - primaryLight.intensity) * 0.20;
+
+      // Camera FOV Kick Pulse
+      if (isSyncing && telemetry.is_kick) {
+        targetCameraFov = 63.5;
+      } else {
+        targetCameraFov = 60.0;
+      }
+      camera.fov += (targetCameraFov - camera.fov) * 0.12;
+      camera.updateProjectionMatrix();
+
+      // Terrain Vertex Wave Undulation
+      const posAttr = terrainGeo.attributes.position;
+      const count = posAttr.count;
+      const speed = isSyncing ? 1.5 : 0.5;
+      const bassValNum = isSyncing ? telemetry.bass_intensity : 0.1;
+      const energyValNum = isSyncing ? telemetry.overall_energy : 0.1;
+
+      // Advance shockwave
+      if (shockwaveRadius > 0) {
+        shockwaveRadius += shockwaveSpeed;
+        shockwaveIntensity *= 0.94;
+        if (shockwaveIntensity < 0.05) shockwaveRadius = 0;
+      }
+
+      for (let i = 0; i < count; i++) {
+        const u = posAttr.getX(i);
+        const v = posAttr.getY(i);
+
+        let z = Math.sin(u * 0.13 + elapsed * speed) * Math.cos(v * 0.13 + elapsed * speed * 0.85) * (1.2 + bassValNum * 4.2);
+        z += Math.sin(u * 0.24 - elapsed * speed * 0.6) * 0.5 * (1.0 + energyValNum * 2.2);
+
+        if (shockwaveRadius > 0) {
+          const dist = Math.hypot(u, v);
+          const diff = Math.abs(dist - shockwaveRadius);
+          if (diff < 4.5) {
+            z += (1.0 - diff / 4.5) * shockwaveIntensity;
+          }
+        }
+        posAttr.setZ(i, z);
+      }
+      posAttr.needsUpdate = true;
+
+      // Update Particle Constellation
+      const pPos = particleGeo.attributes.position;
+      const velMultiplier = isSyncing ? (1.0 + telemetry.overall_energy * 3.0) : 0.8;
+      for (let i = 0; i < particleCount; i++) {
+        let pz = pPos.getZ(i);
+        pz += particleVelocities[i].z * velMultiplier;
+        if (pz > 24) pz = -2;
+        pPos.setZ(i, pz);
+
+        let px = pPos.getX(i) + particleVelocities[i].x * velMultiplier;
+        let py = pPos.getY(i) + particleVelocities[i].y * velMultiplier;
+        if (px > 40) px = -40; if (px < -40) px = 40;
+        if (py > 40) py = -40; if (py < -40) py = 40;
+        pPos.setX(i, px);
+        pPos.setY(i, py);
+      }
+      pGeoNeedUpdate: particleGeo.attributes.position.needsUpdate = true;
+
+      renderer.render(scene, camera);
+      requestAnimationFrame(render3D);
+    }
+    requestAnimationFrame(render3D);
+
+    // WebSocket Telemetry Connection
+    function connectWs() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+      ws.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          telemetry = data;
+
+          if (data.is_kick) {
+            shockwaveRadius = 1.0;
+            shockwaveSpeed = 1.2;
+            shockwaveIntensity = 3.5;
+            hudKickPill.classList.add('active-kick');
+            kickVal.innerText = 'HIT';
+          } else {
+            hudKickPill.classList.remove('active-kick');
+            kickVal.innerText = '-';
+          }
+
+          if (data.is_snare) {
+            hudSnarePill.classList.add('active-snare');
+            snareVal.innerText = 'HIT';
+          } else {
+            hudSnarePill.classList.remove('active-snare');
+            snareVal.innerText = '-';
+          }
+
+          bassVal.innerText = `${Math.round(data.bass_intensity * 100)}%`;
+          energyVal.innerText = `${Math.round(data.overall_energy * 100)}%`;
+          agcVal.innerText = `${data.agc_gain.toFixed(1)}x`;
+
+          const [r, g, b] = data.active_rgb;
+          const rgbStr = `rgb(${r}, ${g}, ${b})`;
+          const hexStr = `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase()}`;
+
+          hexVal.innerText = hexStr;
+          liveColorDot.style.background = rgbStr;
+          liveColorDot.style.boxShadow = `0 0 12px ${rgbStr}`;
+          mobilePulseDot.style.background = rgbStr;
+          mobilePulseDot.style.boxShadow = `0 0 12px ${rgbStr}`;
+          document.documentElement.style.setProperty('--live-glow', `rgba(${r}, ${g}, ${b}, 0.22)`);
+        } catch (_) {}
+      };
+
+      ws.onclose = () => {
+        setTimeout(connectWs, 2000);
+      };
+    }
+    connectWs();
+
+    // REST API Actions
+    async function loadAudioDevices() {
+      try {
+        const res = await fetch('/api/audio/devices');
+        const devs = await res.json();
+        audioSelect.innerHTML = devs.map(d =>
+          `<option value="${d.name}" ${d.is_default ? 'selected' : ''}>${d.name} ${d.is_default ? '(Default)' : ''}</option>`
+        ).join('');
+      } catch (_) {}
+    }
+
+    async function loadBulbs() {
+      try {
+        const res = await fetch('/api/bulbs');
+        const bulbs = await res.json();
+        if (bulbs.length === 0) {
+          bulbList.innerHTML = '<p style="color:var(--text-muted); font-size:13px; padding:12px 0;">No bulbs added yet. Use the accordion below or scan your LAN.</p>';
+          return;
+        }
+        bulbList.innerHTML = bulbs.map(b => `
+          <div class="bulb-item">
+            <div class="bulb-row-top">
+              <div class="bulb-meta-title">
+                <span>${b.id}</span>
+                <span class="status-dot ${b.is_connected ? 'status-online' : 'status-offline'}">
+                  <svg width="6" height="6" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="12"/></svg>
+                  <span>${b.is_connected ? 'Online' : 'Offline'}</span>
+                </span>
+              </div>
+              <button onclick="deleteBulb('${b.id}')" class="btn btn-ghost btn-icon btn-sm" style="color:var(--danger);" title="Remove">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              </button>
+            </div>
+            <div class="bulb-row-bottom">
+              <div class="bulb-info-sub">
+                <span>${b.address}</span>
+                <span class="bulb-sub-badge">${b.bulb_type}</span>
+              </div>
+              <div class="bulb-actions-wrap">
+                <button onclick="setBulbPower('${b.id}', true)" class="btn btn-ghost btn-sm">ON</button>
+                <button onclick="setBulbPower('${b.id}', false)" class="btn btn-ghost btn-sm">OFF</button>
+                <button onclick="setBulbColor('${b.id}', 180)" class="color-btn" style="background:#00f0ff;" title="Cyan"></button>
+                <button onclick="setBulbColor('${b.id}', 300)" class="color-btn" style="background:#ff007f;" title="Pink"></button>
+                <button onclick="setBulbColor('${b.id}', 45)" class="color-btn" style="background:#ffaa00;" title="Amber"></button>
+                <button onclick="setBulbWhite('${b.id}', 800)" class="btn btn-ghost btn-sm">White</button>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      } catch (_) {}
+    }
+
+    async function setBulbPower(id, power) {
+      await fetch(`/api/bulbs/${id}/power`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ power })
+      });
+      loadBulbs();
+    }
+
+    async function setBulbColor(id, hue) {
+      await fetch(`/api/bulbs/${id}/color`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ h: hue, s: 1.0, v: 1.0 })
+      });
+    }
+
+    async function setBulbWhite(id, brightness) {
+      await fetch(`/api/bulbs/${id}/white`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ brightness, temp: 500 })
+      });
+    }
+
+    async function broadcastPower(power) {
+      await fetch('/api/bulbs/broadcast/power', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ power })
+      });
+    }
+
+    async function broadcastWhite(brightness, temp) {
+      await fetch('/api/bulbs/broadcast/white', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ brightness, temp })
+      });
+    }
+
+    async function deleteBulb(id) {
+      if (confirm(`Remove bulb ${id}?`)) {
+        await fetch(`/api/bulbs/${id}`, { method: 'DELETE' });
+        loadBulbs();
+      }
+    }
+
+    // Toggle Sync Engine
+    async function toggleSyncState() {
+      isSyncing = !isSyncing;
+      if (isSyncing) {
+        await fetch('/api/sync/start', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            device: audioSelect.value,
+            palette: paletteSelect.value,
+            ambience_mode: syncSettings.ambience_mode,
+            master_brightness: syncSettings.master_brightness,
+            smooth_transitions: syncSettings.smooth_transitions,
+            auto_normalize: syncSettings.auto_normalize
+          })
+        });
+        updateSyncUi(true);
+      } else {
+        await fetch('/api/sync/stop', { method: 'POST' });
+        updateSyncUi(false);
+      }
+    }
+
+    function updateSyncUi(running) {
+      isSyncing = running;
+      if (running) {
+        mainSyncBtn.className = 'btn btn-stop';
+        mainSyncBtn.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/></svg>
+          <span>Stop Beat Sync</span>`;
+        mobileSyncBtn.className = 'btn btn-stop btn-sm';
+        mobileSyncBtn.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/></svg>
+          <span>Stop</span>`;
+        mobileStatusText.innerText = 'Sync Active';
+        mobilePulseDot.style.background = 'var(--accent)';
+      } else {
+        mainSyncBtn.className = 'btn btn-primary';
+        mainSyncBtn.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <span>Start Beat Sync</span>`;
+        mobileSyncBtn.className = 'btn btn-primary btn-sm';
+        mobileSyncBtn.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <span>Sync</span>`;
+        mobileStatusText.innerText = 'Beat Sync Inactive';
+        mobilePulseDot.style.background = 'var(--text-muted)';
+        mobilePulseDot.style.boxShadow = 'none';
+      }
+    }
+
+    mainSyncBtn.onclick = toggleSyncState;
+    mobileSyncBtn.onclick = toggleSyncState;
+
+    // Setting Updaters
+    paletteSelect.onchange = async () => {
+      syncSettings.palette = paletteSelect.value;
+      await fetch('/api/sync/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ palette: paletteSelect.value })
+      });
+    };
+
+    masterBrightnessSlider.oninput = (e) => {
+      const val = parseInt(e.target.value);
+      masterBrightnessVal.innerText = `${val}%`;
+    };
+
+    masterBrightnessSlider.onchange = async (e) => {
+      const val = parseInt(e.target.value);
+      syncSettings.master_brightness = val / 100;
+      await fetch('/api/sync/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ master_brightness: val / 100 })
+      });
+    };
+
+    window.setMasterBrightness = async (val) => {
+      masterBrightnessSlider.value = val;
+      masterBrightnessVal.innerText = `${val}%`;
+      syncSettings.master_brightness = val / 100;
+      await fetch('/api/sync/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ master_brightness: val / 100 })
+      });
+    };
+
+    window.setAmbienceMode = async (mode) => {
+      syncSettings.ambience_mode = mode;
+      if (mode === 'DarkMode') {
+        ambienceDarkBtn.classList.add('active');
+        ambienceLightBtn.classList.remove('active');
+      } else {
+        ambienceLightBtn.classList.add('active');
+        ambienceDarkBtn.classList.remove('active');
+      }
+      await fetch('/api/sync/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ ambience_mode: mode })
+      });
+    };
+
+    window.toggleAgc = async (enabled) => {
+      syncSettings.auto_normalize = enabled;
+      await fetch('/api/sync/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ auto_normalize: enabled })
+      });
+    };
+
+    window.toggleSmooth = async (enabled) => {
+      syncSettings.smooth_transitions = enabled;
+      await fetch('/api/sync/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ smooth_transitions: enabled })
+      });
+    };
+
+    document.getElementById('refreshAudioBtn').onclick = loadAudioDevices;
+
+    // Scan LAN handler
+    scanLanBtn.onclick = async () => {
+      scanLanBtn.disabled = true;
+      scanLanBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1s linear infinite"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        <span>Scanning LAN...</span>`;
+      try {
+        const res = await fetch('/api/devices/scan');
+        const devices = await res.json();
+        discoveredList.style.display = 'block';
+        if (devices.length === 0) {
+          discoveredList.innerHTML = '<div class="discovered-item" style="color:var(--text-muted)">No devices responded to UDP discovery probe.</div>';
+        } else {
+          discoveredList.innerHTML = `
+            <div style="font-size:12px; font-weight:700; color:var(--accent); margin-bottom:6px;">DISCOVERED ON NETWORK:</div>
+            ${devices.map(d => `
+              <div class="discovered-item">
+                <div><strong>${d.id}</strong> &bull; ${d.ip} (v${d.version})</div>
+                <button onclick="useDiscovered('${d.id}', '${d.ip}', '${d.version}')" class="btn btn-ghost btn-sm" style="min-height:30px; padding:0 8px; font-size:11px;">Use This</button>
+              </div>
+            `).join('')}`;
+        }
+      } catch (err) {
+        discoveredList.style.display = 'block';
+        discoveredList.innerHTML = '<div class="discovered-item" style="color:var(--danger)">Scan request failed.</div>';
+      } finally {
+        scanLanBtn.disabled = false;
+        scanLanBtn.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>
+          <span>Scan Network</span>`;
+      }
+    };
+
+    window.useDiscovered = (id, ip, version) => {
+      document.getElementById('newId').value = id;
+      document.getElementById('newIp').value = ip;
+      if (version && document.getElementById('newVersion')) {
+        document.getElementById('newVersion').value = version;
+      }
+      const body = document.getElementById('addBulbBody');
+      if (!body.classList.contains('open')) toggleAddBulbAccordion();
+      document.getElementById('newKey').focus();
+    };
+
+    // Add Bulb form submit
+    document.getElementById('addBulbBtn').onclick = async () => {
+      const id = document.getElementById('newId').value.trim();
+      const local_key = document.getElementById('newKey').value.trim();
+      const address = document.getElementById('newIp').value.trim();
+      const bulb_type = document.getElementById('newType').value;
+      const version = document.getElementById('newVersion') ? document.getElementById('newVersion').value : '3.5';
+      if (!id || !local_key || !address) {
+        alert('Please fill in Device ID, Local Key, and IP address.');
+        return;
+      }
+      const btn = document.getElementById('addBulbBtn');
+      btn.disabled = true;
+      btn.innerText = 'Connecting...';
+      try {
+        const res = await fetch('/api/bulbs', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ id, local_key, address, bulb_type, version })
+        });
+        if (res.ok) {
+          document.getElementById('newId').value = '';
+          document.getElementById('newKey').value = '';
+          document.getElementById('newIp').value = '';
+          loadBulbs();
+          toggleAddBulbAccordion();
+        } else {
+          const err = await res.text();
+          alert('Failed to connect bulb: ' + err);
+        }
+      } catch (err) {
+        alert('Network error connecting bulb.');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span>Add to Fleet</span>`;
+      }
+    };
+
+    // Initialize application state
+    async function init() {
+      await loadAudioDevices();
+      await loadBulbs();
+      try {
+        const res = await fetch('/api/sync/status');
+        const st = await res.json();
+        updateSyncUi(st.running);
+        if (st.settings) {
+          syncSettings = st.settings;
+          paletteSelect.value = st.settings.palette;
+          window.setAmbienceMode(st.settings.ambience_mode);
+          masterBrightnessSlider.value = Math.round(st.settings.master_brightness * 100);
+          masterBrightnessVal.innerText = `${Math.round(st.settings.master_brightness * 100)}%`;
+          agcToggle.checked = st.settings.auto_normalize;
+          smoothToggle.checked = st.settings.smooth_transitions;
+        }
+      } catch (_) {}
+    }
+    init();
+  </script>
+</body>
+</html>
