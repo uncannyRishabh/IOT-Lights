@@ -1,14 +1,16 @@
-# IOT-Lights 💡🎵
-### Real-Time Music Beat-Sync for Tuya Smart Bulbs • Pure Rust • 100% Local LAN
+![IOT-Bulb Sync Hero Banner](poster.png)
+
+# IOT-Bulb Sync 💡🎵
+### Real-Time Music Beat-Sync & IMAX Prominent-Color Screen Controller for Tuya Smart Bulbs • 100% Local LAN
+> **Run Anywhere — Powered by Pure Rust** 🦀 *(Zero Cloud • Zero Runtime Overhead • Native Cross-Platform Binary)*
 
 [![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg?style=flat&logo=rust)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue.svg)](LICENSE)
 [![Local Control](https://img.shields.io/badge/Cloud%20Dependency-0%25%20(Local%20LAN)-brightgreen.svg)]()
 [![Latency](https://img.shields.io/badge/Beat%20Latency-%3C15ms-success.svg)]()
+**IOT-Bulb Sync** is an ultra-low latency, real-time audio and screen-reactive lighting controller written in pure Rust. It transforms ordinary Tuya and Smart Life Wi-Fi smart bulbs (Wipro, Syska, Gosund, Treatlife, Lumary, Avatar, generic OEM, etc.) into an ultra-responsive music light show and a sub-10ms 4K IMAX screen synchronizer.
 
-**IOT-Lights** is an ultra-low latency, real-time audio-reactive lighting controller written in pure Rust. It transforms ordinary Tuya and Smart Life Wi-Fi smart bulbs (Wipro, Syska, Gosund, Treatlife, Lumary, Avatar, generic OEM, etc.) into a responsive music light show.
-
-Unlike traditional cloud integrations that suffer from 200–800ms internet delays and rate limits, **IOT-Lights operates 100% locally over your Wi-Fi network (Port 6668)** with zero cloud reliance. It features a built-in DSP spectral flux engine, intelligent kick/snare detection, multi-palette lighting choreographies, a mobile-optimized Web Dashboard, and a fast CLI.
+Unlike traditional cloud integrations that suffer from 200–800ms internet delays and rate limits, **IOT-Bulb Sync operates 100% locally over your Wi-Fi network (Port 6668)** with zero cloud reliance. It features a built-in 2D Harmonic-Percussive Source Separation (HPSS) & Formant Crest engine for orthogonal Instrument vs. Vocal isolation, an IMAX Prominent-Color screen sampler (64×36 hardware compression with 100% black-bar and black-pixel rejection), multi-display auto-detection, a 100% GPU-driven custom GLSL shader visualizer with circular particle orbs, and an interactive 360° HSV + White Color Wheel.
 
 ---
 
@@ -40,32 +42,33 @@ Unlike traditional cloud integrations that suffer from 200–800ms internet dela
 ## ⚡ System Architecture
 
 ```
-[ Microphone / BlackHole Virtual Audio Loopback ]
-                       │
-                       ▼
-           [ cpal Audio Ingestion ]  (512 samples buffer @ 44.1 kHz, ~11.6ms)
-                       │
-                       ▼
-         [ RealFFT DSP Beat Detector ]
-         - Spectral Flux (half-wave rectified)
-         - Sub-Bass (20 - 150 Hz) Kick Detection
-         - Mids (250 - 2500 Hz) Snare & Vocal Detection
-         - Dynamic Adaptive Energy Thresholding
-                       │
-                       ▼
-         [ Lighting Choreographer & Rate Limiter ]
-         - Neon Cyberpunk / Synthwave / Club Rave / Vaporwave Palettes
-         - Drop, Build, and Idle State Tracking
-         - Hardware Safety Coalescing (Protects ESP8266/BK7231 MCUs)
-                       │
-                       ▼
-     [ BulbFleet Connection Pool & Tuya LAN Driver ]
-     - High-speed Tuya DP 27 (`music_data`) jump streaming frames
-     - Persistent TCP keep-alive sockets (Port 6668)
-     - AES-128-CBC / ECB encryption & HMAC-SHA256 framing (v3.1 - v3.5)
-                       │
-                       ▼
-        [ Wi-Fi Smart Bulbs (Wipro / Syska / Tuya) ]
+[ Mic / BlackHole Loopback ]                 [ 4K / 5K Multi-Display Screen Capture ]
+             │                                                  │
+             ▼                                                  ▼
+ [ cpal Mid/Side Audio Ingestion ]          [ 64×36 Hardware Quartz Frame Compressor ]
+ (512 samples @ 44.1 kHz, ~11.6ms)          - Strictly removes all black bars & black pixels
+             │                              - Oklab Chromatic Peak + Mean-Shift Clustering
+             ▼                              - Instant scene-cut detection (<15ms reaction)
+ [ RealFFT + Online 2D HPSS Engine ]                            │
+ - Temporal vs. Spectral Median Masking                         │
+ - Formant Crest Factor (Vocals vs. Instruments)                │
+ - dBFS Noise Gate Cutoff & Sensitivity Scaling                 │
+             │                                                  │
+             └────────────────────────┬─────────────────────────┘
+                                      ▼
+               [ Lighting Choreographer & Rate Limiter ]
+               - Auto Stem-Aware Gradual vs. Instant Jump Mode
+               - Unlimited Custom Color Wheel Palettes
+               - Hardware Safety Coalescing (Protects ESP8266/BK7231 MCUs)
+                                      │
+                                      ▼
+            [ BulbFleet Connection Pool & Tuya LAN Driver ]
+            - High-speed Tuya DP 27 (`music_data`) streaming frames
+            - Persistent TCP keep-alive sockets (Port 6668)
+            - AES-128-CBC / ECB encryption & HMAC-SHA256 framing (v3.1 - v3.5)
+                                      │
+                                      ▼
+               [ Wi-Fi Smart Bulbs (Wipro / Syska / Tuya) ]
 ```
 
 ---
@@ -211,21 +214,21 @@ The dashboard gives you:
 To turn a bulb on/off or change its hue directly:
 ```bash
 # Turn ON and set color to Cyan (Hue 180°)
-target/release/iot-lights control \
+target/release/iot-bulb-sync control \
   --id "d79466ba2de1ef6565hrzd" \
   --key 'qxkIfvV3p?KjPZ#7' \
   --ip "192.168.1.2" \
   --power true --hue 180 --version 3.5
 
 # Set warm white mode
-target/release/iot-lights control \
+target/release/iot-bulb-sync control \
   --id "d79466ba2de1ef6565hrzd" \
   --key 'qxkIfvV3p?KjPZ#7' \
   --ip "192.168.1.2" \
   --brightness 800 --version 3.5
 
 # Turn OFF
-target/release/iot-lights control \
+target/release/iot-bulb-sync control \
   --id "d79466ba2de1ef6565hrzd" \
   --key 'qxkIfvV3p?KjPZ#7' \
   --ip "192.168.1.2" \
@@ -235,12 +238,26 @@ target/release/iot-lights control \
 ### 5. Standalone Beat-Sync CLI
 Sync a single bulb directly from the terminal without opening the dashboard:
 ```bash
-target/release/iot-lights sync \
+target/release/iot-bulb-sync sync \
   --id "d79466ba2de1ef6565hrzd" \
   --key 'qxkIfvV3p?KjPZ#7' \
   --ip "192.168.1.2" \
   --palette cyberpunk \
   --version 3.5
+```
+
+### 6. High-Performance IMAX Screen Sync CLI (Prominent Color & Multi-Display)
+Run sub-10ms native screen compression (`64×36` Quartz downscaling) with **100% black-pixel rejection** and **Oklab Prominent Color Clustering** across your entire fleet from `devices.json`:
+```bash
+# If multiple monitors are detected and --display is omitted, IOT-Bulb Sync
+# interactively prompts you to choose which display to synchronize:
+target/release/iot-bulb-sync imax \
+  --fps 20 \
+  --smoothing 0.82 \
+  --saturation-boost 1.35 \
+  --color-mode prominent \
+  --min-brightness 25 \
+  --max-brightness 1000
 ```
 
 ---
@@ -331,5 +348,6 @@ IOT-Lights stands on the shoulders of fantastic open-source projects:
 ---
 
 <p align="center">
-  Made with ❤️ and pure Rust for low-latency lighting.
+  <b>Run Anywhere — Powered by Pure Rust 🦀</b><br>
+  Made with ❤️ and pure Rust for ultra-low-latency lighting.
 </p>

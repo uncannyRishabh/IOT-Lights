@@ -84,12 +84,7 @@ Your bulb must be on the **same local network / Wi-Fi subnet** (2.4 GHz) as your
 ### Option 2: Command-Line Scanner
 Run the standalone scanner tool:
 ```bash
-cargo run --bin iot-lights -- scan --seconds 5
-```
-Output:
-```text
-eb65b1234567890abcdef    192.168.1.45       3.3
-Scan complete. Found 1 device(s).
+cargo run --bin iot-bulb-sync -- scan --seconds 5
 ```
 
 ### Option 3: Router DHCP Table
@@ -101,20 +96,19 @@ Log into your Wi-Fi router's admin portal (usually `192.168.1.1` or `192.168.0.1
 
 ### Via the Web Dashboard
 1. Open `http://localhost:8080` (or `http://<your-lan-ip>:8080` on mobile).
-2. Scroll to the **Connect New Bulb** form.
-3. Enter:
-   - **Device ID**: 22 characters
-   - **Local Key**: 16 characters
-   - **Local IP**: Bulb IP (e.g. `192.168.1.45`)
-   - **Bulb Type**: `Type B` (for almost all modern bulbs made after 2019) or `Type A` (legacy)
-4. Click **Add to Fleet**.
-5. The bulb card will appear with a green **Connected** badge.
-6. Test instant connectivity by clicking **ON**, **OFF**, **Cyan**, **Pink**, or **White**.
+2. All devices in `devices.json` are automatically loaded and connected on startup.
+3. To add a new bulb, open **Connect New Bulb**, enter your **Device ID**, **Local Key**, and **Local IP**, and click **Add to Fleet** (it will automatically persist to `devices.json`).
+4. Use the single **Power ON/OFF Toggle Switch** or open the **Full 360° Color & White Wheel** on any bulb card.
 
 ### Via the CLI
-To test direct music beat-sync from your terminal without opening a browser:
+To run IMAX Prominent-Color Screen Sync across your fleet (prompts for display if multiple monitors are detected):
 ```bash
-cargo run --bin iot-lights -- sync \
+cargo run --release --bin iot-bulb-sync -- imax --fps 20 --color-mode prominent
+```
+
+To test direct music beat-sync from your terminal:
+```bash
+cargo run --release --bin iot-bulb-sync -- sync \
   --id "eb65b1234567890abcdef" \
   --key "a1b2c3d4e5f6g7h8" \
   --ip "192.168.1.45" \
@@ -124,7 +118,7 @@ cargo run --bin iot-lights -- sync \
 To control single bulb attributes via CLI:
 ```bash
 # Turn ON and set to Amber (hue 45°)
-cargo run --bin iot-lights -- control \
+cargo run --release --bin iot-bulb-sync -- control \
   --id "eb65b1234567890abcdef" \
   --key "a1b2c3d4e5f6g7h8" \
   --ip "192.168.1.45" \
@@ -132,7 +126,7 @@ cargo run --bin iot-lights -- control \
   --hue 45
 
 # Turn OFF
-cargo run --bin iot-lights -- control \
+cargo run --release --bin iot-bulb-sync -- control \
   --id "eb65b1234567890abcdef" \
   --key "a1b2c3d4e5f6g7h8" \
   --ip "192.168.1.45" \

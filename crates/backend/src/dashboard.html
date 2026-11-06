@@ -2,35 +2,55 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>IOT-Lights | Audio Beat Sync Studio</title>
+  <title>IOT-Bulb Sync — Studio &amp; IMAX Controller</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <style>
     :root {
-      --bg: #05070d;
-      --card-bg: rgba(9, 13, 23, 0.65);
-      --card-border: rgba(255, 255, 255, 0.08);
-      --card-hover: rgba(20, 27, 46, 0.80);
-      --accent: #00f0ff;
-      --accent-glow: rgba(0, 240, 255, 0.40);
-      --pink: #ff007f;
-      --pink-glow: rgba(255, 0, 127, 0.40);
-      --amber: #ffaa00;
-      --text: #f0f4fc;
-      --text-muted: #8e9db7;
-      --success: #00ff88;
-      --danger: #ff4757;
-      --live-glow: rgba(0, 240, 255, 0.15);
-      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      /* Surfaces */
+      --bg-canvas: #08090C;
+      --surface-0: rgba(14, 16, 21, 0.88);
+      --surface-1: rgba(22, 25, 33, 0.90);
+      --surface-2: rgba(31, 35, 46, 0.95);
+      --surface-interactive: rgba(255, 255, 255, 0.04);
+      --surface-interactive-hover: rgba(255, 255, 255, 0.08);
+
+      /* Crisp 1px Borders */
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --border-focus: rgba(245, 158, 11, 0.55);
+
+      /* Typography */
+      --text-primary: #F3F4F6;
+      --text-secondary: #9CA3AF;
+      --text-muted: #64748B;
+
+      /* Hardware Studio Accents */
+      --accent-primary: #F59E0B;       /* Warm Amber */
+      --accent-primary-soft: rgba(245, 158, 11, 0.14);
+      --accent-secondary: #6366F1;     /* Indigo */
+      --accent-coral: #F43F5E;         /* Coral */
+      --status-online: #10B981;        /* Emerald */
+      --status-danger: #F43F5E;        /* Crimson */
+
+      /* Spring & Easing Curves */
+      --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+      --ease-overshoot: cubic-bezier(0.34, 1.56, 0.64, 1);
+      --ease-snappy: cubic-bezier(0.22, 1, 0.36, 1);
+      --font-stack: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", Roboto, sans-serif;
+      --font-mono: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: var(--font); -webkit-tap-highlight-color: transparent; }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: var(--font-stack); -webkit-tap-highlight-color: transparent; }
     body {
-      background: var(--bg);
-      color: var(--text);
+      background: var(--bg-canvas);
+      color: var(--text-primary);
       min-height: 100vh;
       overflow-x: hidden;
       position: relative;
     }
+
     #threeCanvas {
       position: fixed;
       top: 0;
@@ -40,278 +60,571 @@
       z-index: 0;
       pointer-events: none;
     }
-    .container {
+
+    /* Studio Shell */
+    .studio-shell {
       position: relative;
       z-index: 10;
-      max-width: 1120px;
+      max-width: 1380px;
       margin: 0 auto;
-      padding: 24px 20px 120px;
+      padding: 14px 20px 84px;
+      transition: opacity 0.42s var(--ease-out-expo), transform 0.45s var(--ease-out-expo);
     }
-    .header {
+
+    body.visualizer-only .studio-chrome {
+      opacity: 0;
+      transform: translateY(-16px) scale(0.985);
+      pointer-events: none;
+    }
+    .studio-chrome {
+      transition: opacity 0.42s var(--ease-out-expo), transform 0.45s var(--ease-out-expo);
+    }
+
+    /* Floating Exit Visualizer Pill */
+    #exitVisBtn {
+      position: fixed;
+      top: 20px;
+      right: 24px;
+      z-index: 999;
+      background: rgba(14, 16, 21, 0.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border-strong);
+      color: var(--text-primary);
+      padding: 8px 16px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+      transition: transform 0.2s var(--ease-snappy), opacity 0.2s ease;
+    }
+    #exitVisBtn:hover { transform: scale(1.05); }
+
+    /* Top Command Bar */
+    .top-command-bar {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 16px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--card-border);
-    }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 22px;
-      font-weight: 800;
-      letter-spacing: -0.5px;
-      background: linear-gradient(135deg, var(--accent), var(--pink));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .brand svg { stroke: var(--accent); fill: none; }
-    .header-actions { display: flex; gap: 10px; align-items: center; }
-
-    /* Floating HUD Telemetry Strip */
-    .hud-strip {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      background: rgba(8, 12, 22, 0.70);
-      backdrop-filter: blur(20px) saturate(180%);
-      -webkit-backdrop-filter: blur(20px) saturate(180%);
-      border: 1px solid var(--card-border);
+      min-height: 56px;
+      padding: 8px 16px;
+      background: var(--surface-0);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--border-subtle);
       border-radius: 14px;
-      padding: 10px 16px;
-      margin-bottom: 24px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
-      flex-wrap: wrap;
+      margin-bottom: 16px;
+      gap: 14px;
     }
-    .hud-pill {
+    .brand-wrap {
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 6px 12px;
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid var(--card-border);
+      gap: 10px;
+      min-width: 0;
+      flex-shrink: 0;
+    }
+    .brand-emblem {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      background: #090A0D;
+      border: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+      flex-shrink: 0;
+    }
+    .brand-title {
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .fleet-badge {
       font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.6px;
-      color: var(--text-muted);
-      transition: all 0.12s ease-out;
-    }
-    .hud-pill-val { font-size: 13px; font-weight: 800; color: var(--text); }
-    .hud-pill.active-kick {
-      background: rgba(255, 0, 127, 0.25);
-      border-color: var(--pink);
-      color: #fff;
-      box-shadow: 0 0 14px var(--pink-glow);
-      transform: scale(1.05);
-    }
-    .hud-pill.active-kick .hud-pill-val { color: var(--pink); }
-    .hud-pill.active-snare {
-      background: rgba(0, 240, 255, 0.25);
-      border-color: var(--accent);
-      color: #fff;
-      box-shadow: 0 0 14px var(--accent-glow);
-      transform: scale(1.05);
-    }
-    .hud-pill.active-snare .hud-pill-val { color: var(--accent); }
-    .hud-color-dot {
-      width: 14px;
-      height: 14px;
-      border-radius: 50%;
-      background: var(--accent);
-      box-shadow: 0 0 10px var(--accent-glow);
-      transition: background 0.15s ease, box-shadow 0.15s ease;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--surface-interactive);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
-    /* Glass Cards */
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-    @media (max-width: 860px) { .grid { grid-template-columns: 1fr; gap: 16px; } }
-    .card {
-      background: var(--card-bg);
-      backdrop-filter: blur(20px) saturate(180%);
-      -webkit-backdrop-filter: blur(20px) saturate(180%);
-      border: 1px solid var(--card-border);
-      border-radius: 18px;
-      padding: 22px;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 20px var(--live-glow);
-      transition: border-color 0.25s, box-shadow 0.25s;
+    /* Fixed-Geometry 2-Column Navbar Mode Switcher (Never Runs Away!) */
+    .mode-segmented-control {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      width: 280px;
+      flex-shrink: 0;
+      background: var(--surface-interactive);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 3px;
+      overflow: hidden;
     }
-    .card:hover { border-color: rgba(255, 255, 255, 0.16); }
-    .card-title {
-      font-size: 15px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: var(--text-muted);
+    .mode-slider-pill {
+      position: absolute;
+      top: 3px;
+      bottom: 3px;
+      left: 3px;
+      width: calc((100% - 6px) / 2);
+      background: var(--surface-2);
+      border: 1px solid var(--border-strong);
+      border-radius: 7px;
+      transition: transform 0.36s var(--ease-overshoot);
+      z-index: 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.45);
+    }
+    .mode-segmented-control[data-mode="BeatSync"] .mode-slider-pill { transform: translate3d(0%, 0, 0); }
+    .mode-segmented-control[data-mode="Imax"]     .mode-slider-pill { transform: translate3d(100%, 0, 0); }
+
+    .mode-btn {
+      position: relative;
+      z-index: 1;
+      height: 32px;
+      padding: 0 12px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      margin-bottom: 18px;
+      justify-content: center;
+      gap: 6px;
+      transition: color 0.18s ease;
+      white-space: nowrap;
     }
-    .card-title-left { display: flex; align-items: center; gap: 8px; color: var(--accent); }
-    .card-title-left svg { stroke: var(--accent); }
+    .mode-btn.active { color: var(--text-primary); }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
 
     /* Buttons */
     .btn {
+      height: 34px;
+      padding: 0 13px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      min-height: 44px;
-      padding: 0 18px;
-      border-radius: 10px;
-      font-size: 14px;
-      font-weight: 600;
+      gap: 6px;
       border: 1px solid transparent;
-      cursor: pointer;
-      transition: all 0.15s ease-out;
+      transition: all 0.18s var(--ease-snappy);
       user-select: none;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
     .btn:active { transform: scale(0.97); }
+    .btn-ghost {
+      background: var(--surface-interactive);
+      border-color: var(--border-subtle);
+      color: var(--text-primary);
+    }
+    .btn-ghost:hover {
+      background: var(--surface-interactive-hover);
+      border-color: var(--border-strong);
+    }
     .btn-primary {
-      background: linear-gradient(135deg, var(--accent), #00b4d8);
-      color: #05070d;
-      box-shadow: 0 4px 16px var(--accent-glow);
+      background: var(--accent-primary);
+      color: #090A0D;
       font-weight: 700;
+      border-color: rgba(245, 158, 11, 0.4);
+      box-shadow: 0 2px 10px rgba(245, 158, 11, 0.25);
+    }
+    .btn-primary:hover {
+      background: #FBBF24;
+      box-shadow: 0 2px 14px rgba(245, 158, 11, 0.35);
     }
     .btn-stop {
-      background: linear-gradient(135deg, var(--pink), #d90429);
-      color: #fff;
-      box-shadow: 0 4px 16px var(--pink-glow);
+      background: var(--status-danger);
+      color: #FFFFFF;
       font-weight: 700;
+      border-color: rgba(244, 63, 94, 0.4);
+      box-shadow: 0 2px 10px rgba(244, 63, 94, 0.3);
     }
-    .btn-ghost {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--card-border);
-      color: var(--text);
-    }
-    .btn-ghost:hover { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.15); }
-    .btn-sm { min-height: 36px; padding: 0 12px; font-size: 13px; border-radius: 8px; }
-    .btn-icon { width: 44px; min-height: 44px; padding: 0; }
-    .btn-icon.btn-sm { width: 36px; min-height: 36px; }
+    .btn-stop:hover { background: #FB7185; }
+    .btn-sm { height: 28px; padding: 0 10px; font-size: 11px; border-radius: 6px; }
 
-    /* Form Controls */
-    .form-group { margin-bottom: 16px; }
-    label { display: block; font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
-    select, input {
-      width: 100%;
-      min-height: 44px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid var(--card-border);
-      color: var(--text);
-      padding: 0 14px;
-      border-radius: 10px;
-      font-size: 14px;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-    select:focus, input:focus { border-color: var(--accent); }
-    select option { background: #0c111e; color: #fff; }
-
-    /* Segmented Controls (Ambience Mode) */
-    .segmented-control {
+    /* Studio Workbench 2-Column Grid */
+    .workbench-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px;
-      background: rgba(255, 255, 255, 0.04);
-      padding: 4px;
-      border-radius: 12px;
-      border: 1px solid var(--card-border);
+      grid-template-columns: 1.45fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    /* Studio Cards */
+    .studio-card {
+      background: var(--surface-0);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 16px 18px;
       margin-bottom: 16px;
     }
-    .segmented-btn {
-      padding: 10px;
-      border: none;
-      background: transparent;
-      color: var(--text-muted);
-      border-radius: 8px;
-      font-size: 13px;
+    .studio-card:last-child { margin-bottom: 0; }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .card-title {
+      font-size: 12.5px;
       font-weight: 700;
-      cursor: pointer;
-      transition: all 0.15s ease;
+      letter-spacing: -0.2px;
+      text-transform: uppercase;
+      color: var(--text-muted);
       display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 6px;
+      gap: 8px;
+      min-width: 0;
+      line-height: 1.3;
     }
-    .segmented-btn.active {
-      background: rgba(0, 240, 255, 0.15);
-      border: 1px solid var(--accent);
-      color: #fff;
-      box-shadow: 0 2px 10px var(--accent-glow);
+    .card-title-icon { color: var(--accent-primary); flex-shrink: 0; }
+
+    /* Form & Input Groups */
+    .form-group { margin-bottom: 12px; }
+    .form-group:last-child { margin-bottom: 0; }
+    .form-label-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .form-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      letter-spacing: 0.2px;
+    }
+    .form-badge {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      flex-shrink: 0;
+      padding: 2px 7px;
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid var(--border-subtle);
     }
 
-    /* Range Sliders */
-    .slider-container {
+    select, input[type="text"] {
+      width: 100%;
+      height: 34px;
+      padding: 0 10px;
+      background: var(--surface-interactive);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 12px;
+      font-weight: 500;
+      outline: none;
+      transition: border-color 0.18s ease;
+    }
+    select:focus, input[type="text"]:focus { border-color: var(--border-focus); }
+
+    /* Precision Hardware Fader Slider */
+    .hw-slider-wrap {
+      position: relative;
       display: flex;
       flex-direction: column;
       gap: 8px;
-      margin-bottom: 16px;
+      padding: 10px 12px;
+      background: var(--surface-interactive);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      margin-bottom: 10px;
+      transition: border-color 0.2s var(--ease-snappy), background 0.2s var(--ease-snappy);
+    }
+    .hw-slider-wrap:hover {
+      border-color: var(--border-strong);
+      background: var(--surface-interactive-hover);
     }
     .slider-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      font-size: 13px;
+      gap: 8px;
+      font-size: 11px;
       font-weight: 600;
-      color: var(--text-muted);
+      color: var(--text-secondary);
     }
-    .slider-val { color: var(--accent); font-weight: 700; }
-    input[type=range] {
+    .slider-val {
+      color: var(--text-primary);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .hw-slider-track {
+      position: relative;
+      width: 100%;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      overflow: visible;
+    }
+    .hw-slider-fill {
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      width: var(--fill-pct, 50%);
+      border-radius: 999px;
+      background: var(--accent-primary);
+      pointer-events: none;
+    }
+    .meter-indicator-tick {
+      position: absolute;
+      top: -3px;
+      bottom: -3px;
+      width: 2px;
+      background: #F43F5E;
+      border-radius: 1px;
+      pointer-events: none;
+      z-index: 3;
+      transition: left 0.08s linear;
+    }
+    input[type="range"].hw-range {
       -webkit-appearance: none;
       appearance: none;
       width: 100%;
-      height: 8px;
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 6px;
-      outline: none;
-      padding: 0;
-      border: none;
-      cursor: pointer;
+      height: 22px;
+      margin: -8px 0;
+      background: transparent;
+      cursor: grab;
+      position: relative;
+      z-index: 2;
     }
-    input[type=range]::-webkit-slider-thumb {
+    input[type="range"].hw-range:active { cursor: grabbing; }
+    input[type="range"].hw-range::-webkit-slider-thumb {
       -webkit-appearance: none;
       appearance: none;
-      width: 20px;
-      height: 20px;
-      border-radius: 50%;
-      background: var(--accent);
-      box-shadow: 0 0 10px var(--accent-glow);
-      cursor: pointer;
-      transition: transform 0.1s;
+      width: 18px;
+      height: 12px;
+      border-radius: 4px;
+      background: #F8FAFC;
+      border: 1.5px solid #090A0D;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.65);
+      transition: transform 0.28s var(--ease-overshoot), background-color 0.15s ease;
     }
-    input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.15); }
-    .preset-chips { display: flex; gap: 8px; margin-top: 4px; }
-    .chip {
-      padding: 4px 10px;
-      border-radius: 6px;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--card-border);
-      color: var(--text-muted);
+    input[type="range"].hw-range:hover::-webkit-slider-thumb {
+      transform: scale(1.16);
+      background: #FFFFFF;
+    }
+    input[type="range"].hw-range:active::-webkit-slider-thumb {
+      transform: scale(1.24, 1.10);
+      background: var(--accent-primary);
+    }
+
+    /* 3-Way Segmented Control */
+    .segmented-3way {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      background: var(--surface-interactive);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 3px;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+    .segment-pill-bg {
+      position: absolute;
+      top: 3px;
+      bottom: 3px;
+      left: 3px;
+      width: calc((100% - 6px) / 3);
+      background: var(--surface-2);
+      border: 1px solid var(--border-strong);
+      border-radius: 7px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+      transition: transform 0.36s var(--ease-overshoot);
+      z-index: 0;
+    }
+    .segmented-3way[data-mode="Auto"] .segment-pill-bg,
+    .segmented-3way[data-mode="FullMix"] .segment-pill-bg     { transform: translate3d(0%, 0, 0); }
+    .segmented-3way[data-mode="Gradual"] .segment-pill-bg,
+    .segmented-3way[data-mode="VocalsOnly"] .segment-pill-bg  { transform: translate3d(100%, 0, 0); }
+    .segmented-3way[data-mode="Off"] .segment-pill-bg,
+    .segmented-3way[data-mode="InstrumentsOnly"] .segment-pill-bg { transform: translate3d(200%, 0, 0); }
+
+    .seg-btn {
+      position: relative;
+      z-index: 1;
+      height: 32px;
+      padding: 0 6px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: color 0.18s ease;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .seg-btn.active { color: var(--text-primary); }
+
+    /* 2-Way Segmented Control */
+    .segmented-2way {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      background: var(--surface-interactive);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 3px;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+    .segment-2way-pill {
+      position: absolute;
+      top: 3px;
+      bottom: 3px;
+      left: 3px;
+      width: calc((100% - 6px) / 2);
+      background: var(--surface-2);
+      border: 1px solid var(--border-strong);
+      border-radius: 7px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.45);
+      transition: transform 0.36s var(--ease-overshoot);
+      z-index: 0;
+    }
+    .segmented-2way[data-mode="DarkMode"] .segment-2way-pill,
+    .segmented-2way[data-mode="Prominent"] .segment-2way-pill { transform: translate3d(0%, 0, 0); }
+    .segmented-2way[data-mode="LightMode"] .segment-2way-pill,
+    .segmented-2way[data-mode="AmbientAverage"] .segment-2way-pill { transform: translate3d(100%, 0, 0); }
+
+    /* Locked-Geometry Auto Classifier Status Strip */
+    .auto-classifier-strip {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 12px;
+      min-height: 34px;
+      padding: 6px 12px;
+      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      margin-bottom: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    .auto-state-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .auto-led {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent-secondary);
+      flex-shrink: 0;
+      transition: background-color 0.12s ease;
+    }
+    .auto-led.inst-active { background: var(--accent-primary); }
+    .auto-state-text {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .auto-meter-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 124px;
+      flex-shrink: 0;
+    }
+    .auto-meter-label { font-size: 10px; font-weight: 700; color: var(--text-muted); }
+    .auto-meter-track {
+      position: relative;
+      flex: 1;
+      height: 5px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .auto-meter-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent-primary);
+      transition: width 0.08s linear;
+    }
+    .auto-meter-thresh {
+      position: absolute;
+      top: 0; bottom: 0;
+      width: 1.5px;
+      background: rgba(255, 255, 255, 0.45);
+    }
+    .auto-meter-val {
       font-size: 11px;
       font-weight: 700;
-      cursor: pointer;
-      transition: all 0.15s;
+      color: var(--text-primary);
+      width: 3.2ch;
+      text-align: right;
     }
-    .chip:hover { background: rgba(0, 240, 255, 0.15); color: var(--accent); border-color: var(--accent); }
 
-    /* Switch Toggles */
+    /* Toggle Row */
     .toggle-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 10px 0;
-      border-top: 1px solid var(--card-border);
+      gap: 12px;
+      padding: 8px 10px;
+      background: var(--surface-interactive);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      margin-bottom: 10px;
     }
-    .toggle-meta { display: flex; flex-direction: column; gap: 2px; }
-    .toggle-title { font-size: 13px; font-weight: 700; color: var(--text); }
-    .toggle-desc { font-size: 11px; color: var(--text-muted); }
+    .toggle-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .toggle-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+    .toggle-desc { font-size: 10px; color: var(--text-muted); line-height: 1.35; }
     .switch {
       position: relative;
       display: inline-block;
-      width: 48px;
-      height: 26px;
+      width: 38px;
+      height: 22px;
       flex-shrink: 0;
     }
     .switch input { opacity: 0; width: 0; height: 0; }
@@ -319,567 +632,1275 @@
       position: absolute;
       cursor: pointer;
       top: 0; left: 0; right: 0; bottom: 0;
-      background-color: rgba(255, 255, 255, 0.1);
-      border: 1px solid var(--card-border);
-      border-radius: 26px;
-      transition: .2s;
+      background-color: rgba(255, 255, 255, 0.12);
+      transition: .24s var(--ease-snappy);
+      border-radius: 22px;
+      border: 1px solid var(--border-subtle);
     }
     .switch-slider:before {
       position: absolute;
       content: "";
-      height: 18px;
-      width: 18px;
-      left: 3px;
-      bottom: 3px;
-      background-color: white;
+      height: 16px;
+      width: 16px;
+      left: 2px;
+      bottom: 2px;
+      background-color: #F8FAFC;
+      transition: .24s var(--ease-overshoot);
       border-radius: 50%;
-      transition: .2s;
     }
-    .switch input:checked + .switch-slider {
-      background-color: var(--accent);
-      border-color: var(--accent);
-      box-shadow: 0 0 10px var(--accent-glow);
+    input:checked + .switch-slider {
+      background-color: var(--accent-primary);
+      border-color: rgba(245, 158, 11, 0.4);
     }
-    .switch input:checked + .switch-slider:before {
-      transform: translateX(22px);
-      background-color: #05070d;
+    input:checked + .switch-slider:before {
+      transform: translateX(16px);
+      background-color: #090A0D;
     }
 
-    /* Bulb Fleet Item (Two-Row Ergonomic Wrap) */
-    .bulb-item {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--card-border);
-      padding: 14px 16px;
-      border-radius: 14px;
-      margin-bottom: 12px;
+    /* Preset Chips */
+    .preset-chips {
       display: flex;
-      flex-direction: column;
-      gap: 12px;
-      transition: border-color 0.2s;
+      gap: 6px;
+      margin-top: 6px;
     }
-    .bulb-item:hover { border-color: rgba(255, 255, 255, 0.14); }
-    .bulb-row-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 10px;
+    .chip {
+      flex: 1;
+      height: 24px;
+      border-radius: 6px;
+      border: 1px solid var(--border-subtle);
+      background: var(--surface-interactive);
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      font-variant-numeric: tabular-nums;
+      transition: all 0.15s ease;
     }
-    .bulb-meta-title {
-      font-size: 15px;
-      font-weight: 700;
+    .chip:hover {
+      background: var(--surface-interactive-hover);
+      color: var(--text-primary);
+    }
+
+    /* Custom Color Swatch Strip (Unlimited Swatches) */
+    .custom-swatches-strip {
       display: flex;
       align-items: center;
       gap: 8px;
+      flex-wrap: wrap;
+      padding: 10px 12px;
+      background: var(--surface-interactive);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      margin-bottom: 10px;
+    }
+    .swatch-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface-2);
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      padding: 3px 6px;
+      cursor: pointer;
+      transition: transform 0.15s var(--ease-snappy);
+    }
+    .swatch-item:hover { border-color: var(--accent-primary); }
+    .swatch-preview-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.25);
+    }
+    .swatch-hex {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+    .swatch-del {
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 1;
+    }
+    .swatch-del:hover { color: var(--status-danger); }
+
+    /* Bulb Cards (Zone B) */
+    .fleet-broadcast-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .bulb-card {
+      background: var(--surface-1);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+      transition: border-color 0.18s ease;
+    }
+    .bulb-card:hover { border-color: var(--border-strong); }
+    .bulb-card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .bulb-name-area {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .bulb-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .bulb-edit-btn {
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 2px;
+      display: flex;
+      align-items: center;
+    }
+    .bulb-edit-btn:hover { color: var(--accent-primary); }
+    .bulb-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      margin-top: 3px;
       word-break: break-all;
     }
-    .bulb-row-bottom {
+    .bulb-actions {
       display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
       justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 8px;
+      margin-top: 10px;
       padding-top: 10px;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      border-top: 1px solid rgba(255,255,255,0.05);
     }
-    .bulb-info-sub {
-      font-size: 12px;
-      color: var(--text-muted);
+    .bulb-power-toggle-wrap {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      white-space: nowrap;
     }
-    .bulb-sub-badge {
-      padding: 2px 6px;
-      border-radius: 4px;
-      background: rgba(255, 255, 255, 0.06);
-      font-size: 10px;
-      font-weight: 700;
-      color: var(--text-muted);
-    }
-    .bulb-actions-wrap {
-      display: flex;
-      gap: 6px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-    .status-dot {
+    .status-badge {
       display: inline-flex;
       align-items: center;
       gap: 5px;
-      font-size: 11px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 20px;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 999px;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
-    .status-online { background: rgba(0, 255, 136, 0.15); color: var(--success); }
-    .status-offline { background: rgba(255, 71, 87, 0.15); color: var(--danger); }
-    .color-btn {
-      width: 30px;
-      height: 30px;
-      border-radius: 50%;
-      border: 2px solid rgba(255, 255, 255, 0.2);
-      cursor: pointer;
-      transition: transform 0.1s;
-    }
-    .color-btn:hover { transform: scale(1.15); }
+    .status-badge.online { background: rgba(16, 185, 129, 0.15); color: var(--status-online); }
+    .status-badge.offline { background: rgba(244, 63, 94, 0.15); color: var(--status-danger); }
 
-    /* Collapsible Accordion for Connect New Bulb */
+    /* Interactive Full Color Wheel Modal / Popover */
+    .wheel-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(5, 6, 9, 0.72);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: 500;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+    }
+    .wheel-modal-backdrop.open { display: flex; }
+    .wheel-dialog {
+      width: min(340px, calc(100vw - 24px));
+      background: var(--surface-1);
+      border: 1px solid var(--border-strong);
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.75);
+    }
+    .wheel-canvas-wrap {
+      position: relative;
+      width: 220px;
+      height: 220px;
+      margin: 12px auto;
+      cursor: crosshair;
+    }
+    #colorWheelCanvas {
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+      border: 2px solid rgba(255,255,255,0.12);
+    }
+    .wheel-reticle {
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2.5px solid #FFFFFF;
+      box-shadow: 0 0 6px rgba(0,0,0,0.9);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      top: 50%;
+      left: 50%;
+    }
+
+    /* IMAX Mode Banner & 2-Column Subgrid */
+    .imax-live-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: rgba(245, 158, 11, 0.10);
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      border-radius: 10px;
+      margin-bottom: 14px;
+      font-size: 12px;
+    }
+    .imax-2col-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .cli-command-box {
+      position: relative;
+      background: #050608;
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      padding: 14px 74px 14px 14px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: #F8FAFC;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .copy-cmd-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+    }
+
+    /* Accordion for Add Bulb */
     .accordion-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 14px 16px;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
+      padding: 10px 14px;
+      background: var(--surface-interactive);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
       cursor: pointer;
       user-select: none;
-      transition: background 0.15s;
     }
-    .accordion-header:hover { background: rgba(255, 255, 255, 0.06); }
-    .accordion-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; }
+    .accordion-header:hover { background: var(--surface-interactive-hover); }
+    .accordion-title { font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
     .accordion-body {
       display: none;
-      padding: 16px 0 0;
-      gap: 12px;
+      padding-top: 10px;
+      gap: 8px;
     }
-    .accordion-body.open { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+    .accordion-body.open { display: grid; grid-template-columns: 1fr 1fr; }
 
-    /* Discovered devices drawer */
     .discovered-item {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: rgba(0, 240, 255, 0.05);
-      border: 1px dashed rgba(0, 240, 255, 0.3);
-      padding: 10px 14px;
-      border-radius: 10px;
-      margin-top: 8px;
-      font-size: 13px;
+      gap: 8px;
+      padding: 8px 12px;
+      background: rgba(245, 158, 11, 0.05);
+      border: 1px dashed rgba(245, 158, 11, 0.3);
+      border-radius: 8px;
+      margin-top: 6px;
+      font-size: 11px;
     }
 
-    /* Mobile Sticky Bottom Bar */
-    .mobile-bar {
+    /* Zone C: Locked-Geometry Footer Status Bar (INSTRUMENT & VOCAL) */
+    .locked-status-bar {
       position: fixed;
       bottom: 0;
       left: 0;
       right: 0;
-      background: rgba(8, 12, 22, 0.90);
-      backdrop-filter: blur(24px);
-      -webkit-backdrop-filter: blur(24px);
-      border-top: 1px solid var(--card-border);
-      padding: 12px 20px;
-      display: flex;
-      justify-content: space-between;
+      height: 48px;
+      background: rgba(9, 10, 13, 0.94);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-top: 1px solid var(--border-subtle);
+      display: grid;
+      grid-template-columns: 210px 190px 180px 150px 1fr auto;
       align-items: center;
+      padding: 0 20px;
+      gap: 16px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
       z-index: 100;
     }
-    .mobile-bar-info { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
-    .pulse-indicator {
+    .bar-cell {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .inst-label-short { display: none; }
+    .bar-led {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--status-danger);
+      flex-shrink: 0;
+    }
+    .bar-led.open { background: var(--status-online); }
+    .bar-progress-track {
+      flex: 1;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      overflow: hidden;
+      min-width: 36px;
+    }
+    .bar-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent-primary);
+      transition: width 0.08s linear;
+    }
+    .bar-swatch {
       width: 14px;
       height: 14px;
-      border-radius: 50%;
-      background: var(--text-muted);
-      transition: all 0.1s ease;
+      border-radius: 4px;
+      background: var(--accent-primary);
+      border: 1px solid rgba(255,255,255,0.2);
+      flex-shrink: 0;
     }
 
-    /* Mobile Viewport Reconciliations */
-    @media (max-width: 860px) {
-      .header-actions { display: none; } /* Reconcile duplicate button: mobile bar handles it */
+    /* Responsive Tablet & Mobile Layout Overhaul */
+    @media (max-width: 960px) {
+      .workbench-grid { grid-template-columns: 1fr; }
     }
-    @media (min-width: 861px) {
-      .mobile-bar { display: none; }
-      .container { padding-bottom: 40px; }
+
+    @media (max-width: 860px) {
+      .studio-shell {
+        padding: 12px 12px 104px;
+      }
+      /* 2-Row Top Command Bar on Mobile: Row 1 = Brand + Actions, Row 2 = Full-Width Mode Switcher */
+      .top-command-bar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        height: auto;
+        padding: 12px;
+        gap: 10px;
+      }
+      .brand-wrap {
+        grid-column: 1 / 2;
+        grid-row: 1;
+      }
+      .header-actions {
+        grid-column: 2 / 3;
+        grid-row: 1;
+        justify-self: end;
+      }
+      .mode-segmented-control {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        width: 100%;
+      }
+      .vis-hotkey-hint {
+        display: none;
+      }
+
+      /* 2-Row, 6-Column Non-Overlapping Mobile Telemetry Footer */
+      .locked-status-bar {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        height: auto;
+        padding: 8px 12px;
+        row-gap: 6px;
+        column-gap: 10px;
+        font-size: 10.5px;
+      }
+      .inst-label-full { display: none; }
+      .inst-label-short { display: inline; }
+      /* Row 1: 50% Instrument Meter | 50% Vocal Meter (Zero Overlap!) */
+      .bar-cell-inst {
+        grid-column: 1 / 4;
+        grid-row: 1;
+      }
+      .bar-cell-vocal {
+        grid-column: 4 / 7;
+        grid-row: 1;
+      }
+      /* Row 2: Gate dB | Active Color Hex | FPS */
+      .bar-cell-gate {
+        grid-column: 1 / 4;
+        grid-row: 2;
+      }
+      .bar-cell-color {
+        grid-column: 4 / 6;
+        grid-row: 2;
+      }
+      .bar-cell-agc {
+        display: none;
+      }
+      .bar-cell-fps {
+        grid-column: 6 / 7;
+        grid-row: 2;
+        justify-self: end;
+      }
+    }
+
+    @media (max-width: 600px) {
+      .studio-card {
+        padding: 14px;
+      }
+      .brand-emblem {
+        width: 30px;
+        height: 30px;
+      }
+      .brand-title {
+        font-size: 14px;
+        gap: 6px;
+      }
+      .fleet-badge {
+        font-size: 10px;
+        padding: 2px 6px;
+      }
+      .header-actions .btn {
+        height: 32px;
+        padding: 0 10px;
+        font-size: 11px;
+      }
+      /* Stack Auto-Classifier Strip cleanly on narrow viewports */
+      .auto-classifier-strip {
+        grid-template-columns: 1fr;
+        height: auto;
+        padding: 8px 10px;
+        gap: 6px;
+      }
+      .auto-meter-wrap {
+        width: 100%;
+      }
+      .imax-2col-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      .accordion-body.open {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
 <body>
-  <!-- Full-Viewport 3D Three.js WebGL Scene -->
+  <!-- Full-Viewport 100% GPU Custom Shader WebGL Canvas -->
   <canvas id="threeCanvas"></canvas>
 
-  <div class="container">
-    <!-- Header -->
-    <header class="header">
-      <div class="brand">
-        <svg width="24" height="24" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-        <span>IOT-Lights Studio</span>
+  <!-- Exit Visualizer Only Floating Pill -->
+  <button id="exitVisBtn" onclick="toggleVisualizerOnly(false)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    <span>Exit Visualizer (Esc)</span>
+  </button>
+
+  <!-- Full 360° HSV + White Color Wheel Modal -->
+  <div id="colorWheelModal" class="wheel-modal-backdrop" onclick="if(event.target===this) closeColorWheelModal()">
+    <div class="wheel-dialog">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <span id="wheelModalTitle" style="font-size:13px; font-weight:700;">Full Spectrum Color &amp; White Wheel</span>
+        <button class="btn btn-ghost btn-sm" onclick="closeColorWheelModal()">✕</button>
       </div>
+      <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
+        Outer rim = 360° pure RGB Hue • Center = Pure Crisp White (Saturation 0%)
+      </div>
+
+      <div class="wheel-canvas-wrap" id="wheelCanvasWrap">
+        <canvas id="colorWheelCanvas" width="220" height="220"></canvas>
+        <div class="wheel-reticle" id="wheelReticle"></div>
+      </div>
+
+      <div class="hw-slider-wrap" style="margin-top:10px;">
+        <div class="slider-header">
+          <span>Brightness / Value</span>
+          <span id="wheelValueReadout" class="slider-val">100%</span>
+        </div>
+        <div class="hw-slider-track">
+          <div class="hw-slider-fill" id="wheelValueFill" style="--fill-pct: 100%;"></div>
+          <input type="range" class="hw-range" id="wheelValueSlider" min="5" max="100" value="100" oninput="onWheelValueInput(this.value)">
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:10px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div id="wheelLivePreview" style="width:28px; height:28px; border-radius:6px; border:1px solid var(--border-strong); background:#F59E0B;"></div>
+          <span id="wheelHexReadout" style="font-family:var(--font-mono); font-size:12px; font-weight:700;">#F59E0B</span>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-ghost btn-sm" onclick="setWheelPureWhite()">Pure White</button>
+          <button class="btn btn-primary btn-sm" onclick="applyColorWheelSelection()">Apply</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="studio-shell studio-chrome">
+    <!-- Top Command Bar -->
+    <header class="top-command-bar">
+      <div class="brand-wrap">
+        <div class="brand-emblem" title="IOT-Bulb Sync (Bulb + Gear Emblem)">
+          <svg width="22" height="22" viewBox="0 0 64 64">
+            <path d="M30 6 L34 6 L35 11 L39 12.5 L43 9.5 L46 12.5 L43 16.5 L44.5 20.5 L49.5 21.5 L49.5 25.5 L44.5 26.5 L43 30.5 L46 34.5 L43 37.5 L39 34.5 L35 36 L34 41 L30 41 L29 36 L25 34.5 L21 37.5 L18 34.5 L21 30.5 L19.5 26.5 L14.5 25.5 L14.5 21.5 L19.5 20.5 L21 16.5 L18 12.5 L21 9.5 L25 12.5 L29 11 Z"
+                  transform="translate(0, 4)" fill="none" stroke="#F59E0B" stroke-width="2.6" stroke-linejoin="round"/>
+            <path d="M23 38 C18 33 18 22 25 17 C29 13.5 35 13.5 39 17 C46 22 46 33 41 38 C38.5 40.5 37.5 43 37.5 46 L26.5 46 C26.5 43 25.5 40.5 23 38 Z"
+                  fill="#00F0FF" fill-opacity="0.28" stroke="#00F0FF" stroke-width="2.5"/>
+            <line x1="27" y1="50" x2="37" y2="50" stroke="#CBD5E1" stroke-width="3" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="brand-title">
+          <span>IOT-Bulb Sync</span>
+          <span class="fleet-badge" id="topFleetBadge">0/0 Online</span>
+        </div>
+      </div>
+
+      <!-- Locked-Width 2-Column Mode Switcher (Pill Never Runs Away!) -->
+      <div class="mode-segmented-control" id="modeControl" data-mode="BeatSync">
+        <div class="mode-slider-pill"></div>
+        <button type="button" class="mode-btn active" data-mode="BeatSync" onclick="switchStageMode('BeatSync')">
+          <span>🎵 Beat Sync</span>
+        </button>
+        <button type="button" class="mode-btn" data-mode="Imax" onclick="switchStageMode('Imax')">
+          <span>🎬 IMAX Mode</span>
+        </button>
+      </div>
+
+      <!-- Header Actions -->
       <div class="header-actions">
-        <button id="mainSyncBtn" class="btn btn-primary">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          <span id="mainSyncLabel">Start Beat Sync</span>
+        <button id="visOnlyBtn" class="btn btn-ghost" onclick="toggleVisualizerOnly(true)" title="Hotkey: V">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          <span>Visualizer<span class="vis-hotkey-hint"> (V)</span></span>
+        </button>
+        <button id="mainSyncBtn" class="btn btn-primary" onclick="toggleSyncState()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <span id="mainSyncLabel">Start Sync</span>
         </button>
       </div>
     </header>
 
-    <!-- Translucent Floating HUD Telemetry Strip -->
-    <div class="hud-strip">
-      <div class="hud-pill" id="hudFpsPill">
-        <span>FPS</span>
-        <span class="hud-pill-val" id="fpsVal">60</span>
-      </div>
-      <div class="hud-pill" id="hudKickPill">
-        <span>KICK</span>
-        <span class="hud-pill-val" id="kickVal">-</span>
-      </div>
-      <div class="hud-pill" id="hudSnarePill">
-        <span>SNARE</span>
-        <span class="hud-pill-val" id="snareVal">-</span>
-      </div>
-      <div class="hud-pill">
-        <span>BASS</span>
-        <span class="hud-pill-val" id="bassVal">0%</span>
-      </div>
-      <div class="hud-pill">
-        <span>ENERGY</span>
-        <span class="hud-pill-val" id="energyVal">0%</span>
-      </div>
-      <div class="hud-pill">
-        <span>AGC GAIN</span>
-        <span class="hud-pill-val" id="agcVal">1.0x</span>
-      </div>
-      <div class="hud-pill" style="margin-left:auto;">
-        <div id="liveColorDot" class="hud-color-dot"></div>
-        <span class="hud-pill-val" id="hexVal">#00F0FF</span>
-      </div>
-    </div>
-
-    <div class="grid">
-      <!-- Sync Engine Card -->
-      <section class="card">
-        <div class="card-title">
-          <div class="card-title-left">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
-            <span>Sync Engine</span>
-          </div>
-        </div>
-
-        <!-- Audio Capture Selection -->
-        <div class="form-group">
-          <label>Audio Capture Input</label>
-          <div style="display:flex; gap:8px;">
-            <select id="audioSelect"></select>
-            <button id="refreshAudioBtn" class="btn btn-ghost btn-icon" title="Refresh audio devices">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            </button>
-          </div>
-        </div>
-
-        <!-- Lighting Palette -->
-        <div class="form-group">
-          <label>Lighting Palette</label>
-          <select id="paletteSelect">
-            <option value="Cyberpunk">Cyberpunk Neon (Cyan & Magenta)</option>
-            <option value="Synthwave">Synthwave Sunset (Warm Orange & Violet)</option>
-            <option value="ClubRave">Club Rave (High-Contrast Strobe Hits)</option>
-            <option value="Vaporwave">Vaporwave Pastel (Soft Mint & Pink)</option>
-            <option value="AmbientChill">Ambient Chill (Deep Indigo & Teal)</option>
-          </select>
-        </div>
-
-        <!-- Master Bulb Brightness Slider -->
-        <div class="slider-container">
-          <div class="slider-header">
-            <span>Master Bulb Brightness</span>
-            <span id="masterBrightnessVal" class="slider-val">100%</span>
-          </div>
-          <input type="range" id="masterBrightnessSlider" min="1" max="100" value="100">
-          <div class="preset-chips">
-            <button class="chip" onclick="setMasterBrightness(25)">25%</button>
-            <button class="chip" onclick="setMasterBrightness(50)">50%</button>
-            <button class="chip" onclick="setMasterBrightness(75)">75%</button>
-            <button class="chip" onclick="setMasterBrightness(100)">100%</button>
-          </div>
-        </div>
-
-        <!-- Bulb Ambience Mode (Club Dark vs Room Light) -->
-        <div class="form-group" style="margin-top:14px;">
-          <label>Bulb Ambience Mode (Physical Lights & 3D Floor)</label>
-          <div class="segmented-control">
-            <button id="ambienceDarkBtn" class="segmented-btn active" onclick="setAmbienceMode('DarkMode')">
-              <span>🌑 Dark (Club Strobe)</span>
-            </button>
-            <button id="ambienceLightBtn" class="segmented-btn" onclick="setAmbienceMode('LightMode')">
-              <span>💡 Light (Room Fill)</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Auto-Normalize Volume (AGC) Toggle -->
-        <div class="toggle-row">
-          <div class="toggle-meta">
-            <div class="toggle-title">Auto-Normalize Volume (AGC)</div>
-            <div class="toggle-desc">Anti-pegging compression keeps transients sharp on loud tracks</div>
-          </div>
-          <label class="switch">
-            <input type="checkbox" id="agcToggle" checked onchange="toggleAgc(this.checked)">
-            <span class="switch-slider"></span>
-          </label>
-        </div>
-
-        <!-- Smooth Color Transitions Toggle -->
-        <div class="toggle-row">
-          <div class="toggle-meta">
-            <div class="toggle-title">Smooth Transitions (Gradual LERP)</div>
-            <div class="toggle-desc">Interpolates colors via shortest-arc HSL; avoids strobe seizures</div>
-          </div>
-          <label class="switch">
-            <input type="checkbox" id="smoothToggle" checked onchange="toggleSmooth(this.checked)">
-            <span class="switch-slider"></span>
-          </label>
-        </div>
-
-        <!-- Broadcast Fleet Controls -->
-        <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--card-border);">
-          <label>Broadcast Fleet Controls</label>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <button onclick="broadcastPower(true)" class="btn btn-ghost btn-sm">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
-              <span>All ON</span>
-            </button>
-            <button onclick="broadcastPower(false)" class="btn btn-ghost btn-sm">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
-              <span>All OFF</span>
-            </button>
-            <button onclick="broadcastWhite(900, 500)" class="btn btn-ghost btn-sm">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-              <span>All White</span>
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Connected Bulbs Card -->
-      <section class="card">
-        <div class="card-title">
-          <div class="card-title-left">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>
-            <span>Bulb Fleet</span>
-          </div>
-          <button id="scanLanBtn" class="btn btn-ghost btn-sm">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>
-            <span>Scan Network</span>
-          </button>
-        </div>
-
-        <!-- Discovered devices -->
-        <div id="discoveredList" style="margin-bottom:12px; display:none;"></div>
-
-        <!-- Connected bulb items -->
-        <div id="bulbList"></div>
-
-        <!-- Collapsible Connect New Bulb Accordion -->
-        <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--card-border);">
-          <div class="accordion-header" onclick="toggleAddBulbAccordion()">
-            <div class="accordion-title">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              <span>Connect New Bulb</span>
+    <!-- Studio Workbench 2-Column Grid -->
+    <div class="workbench-grid">
+      <!-- ZONE A: PRIMARY STUDIO WORKBENCH (~60% Width) -->
+      <div class="workbench-zone-a">
+        <!-- DECK 1: AUDIO BEAT SYNC CONTROLS (Hidden in IMAX Mode) -->
+        <div id="deckBeatSync">
+          <!-- CARD 1: SIGNAL & STEM ROUTING -->
+          <section class="studio-card">
+            <div class="card-header">
+              <div class="card-title">
+                <svg class="card-title-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 1v22M17 5v14M7 9v6M22 10v4M2 11v2"/></svg>
+                <span>1. Signal &amp; 2D HPSS Stem Routing</span>
+              </div>
+              <span class="form-badge">2D HPSS • FORMANT</span>
             </div>
-            <svg id="accordionChevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.2s;"><polyline points="6 9 12 15 18 9"/></svg>
+
+            <div class="form-group">
+              <div class="form-label-row">
+                <span class="form-label">Audio Input Capture</span>
+                <button onclick="loadAudioDevices()" class="btn btn-ghost btn-sm" style="height:22px; padding:0 6px;">↻ Refresh</button>
+              </div>
+              <select id="audioSelect" onchange="onAudioDeviceChange()"></select>
+            </div>
+
+            <div class="form-group" style="margin-top:14px;">
+              <div class="form-label-row">
+                <span class="form-label">Stem / Source Focus</span>
+                <span id="stemFocusBadge" class="form-badge">FULLMIX</span>
+              </div>
+              <div class="segmented-3way" id="stemFocusControl" data-mode="FullMix">
+                <div class="segment-pill-bg"></div>
+                <button type="button" class="seg-btn active" data-val="FullMix" onclick="setStemFocus('FullMix')">Full Mix</button>
+                <button type="button" class="seg-btn" data-val="VocalsOnly" onclick="setStemFocus('VocalsOnly')">🎙 Vocals</button>
+                <button type="button" class="seg-btn" data-val="InstrumentsOnly" onclick="setStemFocus('InstrumentsOnly')">🎸 Instruments</button>
+              </div>
+            </div>
+
+            <div class="hw-slider-wrap">
+              <div class="slider-header">
+                <span>Noise Gate Cutoff (dBFS)</span>
+                <span id="noiseGateVal" class="slider-val">-45 dB (Live: -60 dB)</span>
+              </div>
+              <div class="hw-slider-track">
+                <div class="hw-slider-fill" id="noiseGateFill" style="--fill-pct: 36%;"></div>
+                <div class="meter-indicator-tick" id="liveDbMeterTick" style="left: 10%;"></div>
+                <input type="range" class="hw-range" id="noiseGateSlider" min="-65" max="-10" value="-45" oninput="onNoiseGateInput(this.value)" onchange="onNoiseGateChange(this.value)">
+              </div>
+            </div>
+
+            <div class="hw-slider-wrap">
+              <div class="slider-header">
+                <span>Onset Sensitivity</span>
+                <span id="sensitivityVal" class="slider-val">1.00x</span>
+              </div>
+              <div class="hw-slider-track">
+                <div class="hw-slider-fill" id="sensitivityFill" style="--fill-pct: 28%;"></div>
+                <input type="range" class="hw-range" id="sensitivitySlider" min="20" max="300" value="100" oninput="onSensitivityInput(this.value)" onchange="onSensitivityChange(this.value)">
+              </div>
+            </div>
+          </section>
+
+          <!-- CARD 2: CHOREOGRAPHY & COLOR ENGINE (Audio Palette section) -->
+          <section class="studio-card">
+            <div class="card-header">
+              <div class="card-title">
+                <svg class="card-title-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 10 10 0 0 0 0-20"/></svg>
+                <span>2. Choreography &amp; Color Palette</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <div class="form-label-row">
+                <span class="form-label">Beat Sync Lighting Palette</span>
+                <span class="form-badge">360° COLOR WHEEL</span>
+              </div>
+              <select id="paletteSelect" onchange="onPaletteChange()">
+                <option value="Cyberpunk">Cyberpunk Neon (Cyan &amp; Magenta)</option>
+                <option value="Synthwave">Synthwave Sunset (Amber &amp; Violet)</option>
+                <option value="ClubRave">Club Rave (High-Contrast Strobe Hits)</option>
+                <option value="Vaporwave">Vaporwave Pastel (Soft Mint &amp; Pink)</option>
+                <option value="AmbientChill">Ambient Chill (Deep Indigo &amp; Teal)</option>
+                <option value="Custom">Custom User Palette (Full Color Wheel)</option>
+              </select>
+            </div>
+
+            <!-- Custom User Palette Swatch Bar (Unlimited Colors via Full Color Wheel!) -->
+            <div id="customSwatchWrap" class="custom-swatches-strip" style="display:none;">
+              <div style="width:100%; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:4px;">
+                <span class="form-label">Tap any swatch to open Full 360° Color Wheel:</span>
+                <button onclick="addCustomColorViaWheel()" class="btn btn-primary btn-sm" style="height:24px; padding:0 8px;">+ Add Wheel Color</button>
+              </div>
+              <div id="swatchList" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+            </div>
+          </section>
+
+          <!-- CARD 3: TRANSITION PHYSICS & DYNAMICS -->
+          <section class="studio-card">
+            <div class="card-header">
+              <div class="card-title">
+                <svg class="card-title-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                <span>3. Transition Physics &amp; Dynamics</span>
+              </div>
+              <span class="form-badge" id="transitionModeBadge">AUTO • STEM</span>
+            </div>
+
+            <div class="segmented-3way" id="transitionModeControl" data-mode="Auto">
+              <div class="segment-pill-bg" id="transitionPillBg"></div>
+              <button type="button" class="seg-btn active" data-val="Auto" onclick="setTransitionMode('Auto')">⚡ Auto</button>
+              <button type="button" class="seg-btn" data-val="Gradual" onclick="setTransitionMode('Gradual')">🌊 Gradual</button>
+              <button type="button" class="seg-btn" data-val="Off" onclick="setTransitionMode('Off')">🎯 Instant</button>
+            </div>
+
+            <div class="auto-classifier-strip" id="autoClassifierStrip">
+              <div class="auto-state-left">
+                <span class="auto-led" id="autoStateLed"></span>
+                <span class="auto-state-text" id="autoStateText">VOCALS / MICRO-FREQ → GRADUAL ON</span>
+              </div>
+              <div class="auto-meter-wrap" title="Real-time Instrument Presence Score (Threshold: 42%)">
+                <span class="auto-meter-label">INST</span>
+                <div class="auto-meter-track">
+                  <div class="auto-meter-fill" id="autoInstMeterFill"></div>
+                  <div class="auto-meter-thresh" style="left: 42%;"></div>
+                </div>
+                <span class="auto-meter-val" id="autoInstScoreVal">00%</span>
+              </div>
+            </div>
+
+            <div class="toggle-row" id="autoPolarityRow">
+              <div class="toggle-meta">
+                <div class="toggle-title">Cutoff Gradual on Vocal / Micro-Freq</div>
+                <div class="toggle-desc">When enabled, forces Gradual OFF on quiet/vocal-only stems too</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="invertAutoGradualToggle" onchange="toggleInvertAutoGradual(this.checked)">
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+
+            <div id="gradualSlidersGroup">
+              <div class="hw-slider-wrap">
+                <div class="slider-header">
+                  <span>Transition Speed (LERP Velocity)</span>
+                  <span id="transitionSpeedVal" class="slider-val">65% (Snappy)</span>
+                </div>
+                <div class="hw-slider-track">
+                  <div class="hw-slider-fill" id="transitionSpeedFill" style="--fill-pct: 65%;"></div>
+                  <input type="range" class="hw-range" id="transitionSpeedSlider" min="10" max="100" value="65" oninput="onSpeedInput(this.value)" onchange="onSpeedChange(this.value)">
+                </div>
+              </div>
+
+              <div class="hw-slider-wrap">
+                <div class="slider-header">
+                  <span>Color Change Frequency</span>
+                  <span id="colorFreqVal" class="slider-val">70% (162ms)</span>
+                </div>
+                <div class="hw-slider-track">
+                  <div class="hw-slider-fill" id="colorFreqFill" style="--fill-pct: 70%;"></div>
+                  <input type="range" class="hw-range" id="colorFreqSlider" min="10" max="100" value="70" oninput="onFreqInput(this.value)" onchange="onFreqChange(this.value)">
+                </div>
+              </div>
+            </div>
+
+            <div class="toggle-row" style="margin-top:6px;">
+              <div class="toggle-meta">
+                <div class="toggle-title">Auto-Normalize Volume (AGC)</div>
+                <div class="toggle-desc">Anti-pegging compression keeps transients sharp on loud tracks</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="agcToggle" checked onchange="toggleAgc(this.checked)">
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+          </section>
+        </div>
+
+        <!-- DECK 2: IMAX MODE (Shows ONLY Options Modifiable in IMAX Mode!) -->
+        <div id="deckImax" style="display:none;">
+          <section class="studio-card">
+            <div class="card-header">
+              <div class="card-title">
+                <svg class="card-title-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                <span>IMAX Screen Sync — Prominent Color Engine</span>
+              </div>
+              <span class="form-badge" id="imaxModeStatusBadge">64×36 • ZERO-BLACK</span>
+            </div>
+
+            <div class="imax-live-banner" id="imaxBanner">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span class="bar-led open" id="imaxBannerLed"></span>
+                <div>
+                  <div style="font-weight:700; color:var(--text-primary);" id="imaxBannerTitle">IMAX Mode Active — Only IMAX Controls Shown</div>
+                  <div style="font-size:11px; color:var(--text-secondary);" id="imaxBannerDesc">Hardware 64×36 frame compression • Black bars &amp; black pixels 100% ignored</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Multi-Display Selector -->
+            <div class="form-group">
+              <div class="form-label-row">
+                <span class="form-label">Target Display (Auto-Prompts in CLI when Multiple Detected)</span>
+                <button onclick="loadImaxDisplays()" class="btn btn-ghost btn-sm" style="height:22px; padding:0 6px;">↻ Detect Displays</button>
+              </div>
+              <select id="imaxDisplaySelect" onchange="onImaxSettingChange()"></select>
+            </div>
+
+            <!-- Prominent Color vs Ambient Average Mode -->
+            <div class="form-group" style="margin-top:14px;">
+              <div class="form-label-row">
+                <span class="form-label">Color Extraction Algorithm</span>
+                <span class="form-badge" id="imaxColorModeBadge">PROMINENT CLUSTER</span>
+              </div>
+              <div class="segmented-2way" id="imaxColorModeControl" data-mode="Prominent">
+                <div class="segment-2way-pill"></div>
+                <button type="button" class="seg-btn active" onclick="setImaxColorMode('Prominent')">🎯 Prominent Color (Oklab Peak)</button>
+                <button type="button" class="seg-btn" onclick="setImaxColorMode('AmbientAverage')">🌊 Ambient Average</button>
+              </div>
+            </div>
+
+            <div class="hw-slider-wrap">
+              <div class="slider-header">
+                <span>Scene Reaction Speed (Minimal Transition Time)</span>
+                <span id="imaxSmoothVal" class="slider-val">82% (Ultra-Fast Cut)</span>
+              </div>
+              <div class="hw-slider-track">
+                <div class="hw-slider-fill" id="imaxSmoothFill" style="--fill-pct: 82%;"></div>
+                <input type="range" class="hw-range" id="imaxSmoothSlider" min="10" max="100" value="82" oninput="onImaxSliderInput()" onchange="onImaxSettingChange()">
+              </div>
+            </div>
+
+            <div class="imax-2col-grid">
+              <div class="hw-slider-wrap">
+                <div class="slider-header">
+                  <span>Target Capture Rate</span>
+                  <span id="imaxFpsVal" class="slider-val">20 FPS</span>
+                </div>
+                <div class="hw-slider-track">
+                  <div class="hw-slider-fill" id="imaxFpsFill" style="--fill-pct: 55%;"></div>
+                  <input type="range" class="hw-range" id="imaxFpsSlider" min="8" max="30" value="20" oninput="onImaxSliderInput()" onchange="onImaxSettingChange()">
+                </div>
+              </div>
+
+              <div class="hw-slider-wrap">
+                <div class="slider-header">
+                  <span>Chroma / Saturation Boost</span>
+                  <span id="imaxSatVal" class="slider-val">1.35x</span>
+                </div>
+                <div class="hw-slider-track">
+                  <div class="hw-slider-fill" id="imaxSatFill" style="--fill-pct: 35%;"></div>
+                  <input type="range" class="hw-range" id="imaxSatSlider" min="100" max="200" value="135" oninput="onImaxSliderInput()" onchange="onImaxSettingChange()">
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top:8px;">
+              <div class="form-label-row">
+                <span class="form-label">Standalone CLI Command (Prompts for Display if Multiple Connected)</span>
+              </div>
+              <div class="cli-command-box">
+                <button class="btn btn-ghost btn-sm copy-cmd-btn" onclick="copyImaxCommand()">📋 Copy</button>
+                <div id="imaxCommandText">target/release/iot-bulb-sync imax --fps 20 --smoothing 0.82 --saturation-boost 1.35 --color-mode prominent</div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- SHARED PHYSICAL OUTPUT CARD (Modifiable in Both Beat Sync & IMAX Mode) -->
+        <section class="studio-card" style="margin-top:16px;">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="card-title-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg>
+              <span>Physical Bulb Output &amp; Ambience Floor</span>
+            </div>
           </div>
-          <div id="addBulbBody" class="accordion-body">
-            <input id="newId" placeholder="Device ID (22 chars)" autocomplete="off">
-            <input id="newKey" placeholder="Local Key (16 chars)" autocomplete="off">
-            <input id="newIp" placeholder="Local IP (e.g. 192.168.1.50)" autocomplete="off">
-            <select id="newType">
-              <option value="TypeB">Type B (Modern 20-27 / Wipro / Syska)</option>
-              <option value="TypeA">Type A (Legacy 1-5)</option>
-            </select>
-            <select id="newVersion">
-              <option value="3.5" selected>Protocol v3.5 (Modern)</option>
-              <option value="3.3">Protocol v3.3</option>
-              <option value="3.4">Protocol v3.4</option>
-              <option value="3.1">Protocol v3.1</option>
-            </select>
-            <button id="addBulbBtn" class="btn btn-primary" style="grid-column: 1 / -1;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              <span>Add to Fleet</span>
+
+          <div class="form-group">
+            <div class="form-label-row">
+              <span class="form-label">Bulb Ambience Floor Mode</span>
+            </div>
+            <div class="segmented-2way" id="ambienceModeControl" data-mode="DarkMode">
+              <div class="segment-2way-pill"></div>
+              <button type="button" class="seg-btn active" onclick="setAmbienceMode('DarkMode')">🌑 Club Strobe (Low Floor)</button>
+              <button type="button" class="seg-btn" onclick="setAmbienceMode('LightMode')">💡 Room Fill (High Floor)</button>
+            </div>
+          </div>
+
+          <div class="hw-slider-wrap">
+            <div class="slider-header">
+              <span>Master Bulb Brightness Cap</span>
+              <span id="masterBrightnessVal" class="slider-val">100%</span>
+            </div>
+            <div class="hw-slider-track">
+              <div class="hw-slider-fill" id="masterBrightnessFill" style="--fill-pct: 100%;"></div>
+              <input type="range" class="hw-range" id="masterBrightnessSlider" min="1" max="100" value="100" oninput="onBrightnessInput(this.value)" onchange="onBrightnessChange(this.value)">
+            </div>
+            <div class="preset-chips">
+              <button class="chip" onclick="setMasterBrightness(25)">25%</button>
+              <button class="chip" onclick="setMasterBrightness(50)">50%</button>
+              <button class="chip" onclick="setMasterBrightness(75)">75%</button>
+              <button class="chip" onclick="setMasterBrightness(100)">100%</button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ZONE B: BULB FLEET RAIL (~40% Width) -->
+      <div class="workbench-zone-b">
+        <section class="studio-card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="card-title-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>
+              <span>Bulb Fleet Rail</span>
+            </div>
+            <button id="scanLanBtn" onclick="triggerLanScan()" class="btn btn-ghost btn-sm">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 10 10 0 0 0 0-20"/></svg>
+              <span>Scan LAN</span>
             </button>
           </div>
-        </div>
-      </section>
+
+          <!-- Broadcast Fleet Master Toggle & Color Wheel Bar -->
+          <div class="fleet-broadcast-bar">
+            <div class="bulb-power-toggle-wrap">
+              <label class="switch" title="Toggle Power for All Bulbs">
+                <input type="checkbox" id="fleetMasterPowerToggle" checked onchange="broadcastPower(this.checked)">
+                <span class="switch-slider"></span>
+              </label>
+              <span>Fleet Power</span>
+            </div>
+            <button onclick="openColorWheelForBroadcast()" class="btn btn-ghost btn-sm">
+              🎨 Broadcast Color / White Wheel
+            </button>
+          </div>
+
+          <!-- Discovered LAN items -->
+          <div id="discoveredList" style="margin-bottom:12px; display:none;"></div>
+
+          <!-- Active Bulb Cards -->
+          <div id="bulbList"></div>
+
+          <!-- Collapsible Add Bulb Accordion -->
+          <div style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border-subtle);">
+            <div class="accordion-header" onclick="toggleAddBulbAccordion()">
+              <div class="accordion-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span>Connect New Bulb</span>
+              </div>
+              <svg id="accordionChevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition:transform 0.2s;"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div id="addBulbBody" class="accordion-body">
+              <input id="newId" type="text" placeholder="Device ID (22 chars)" autocomplete="off">
+              <input id="newKey" type="text" placeholder="Local Key (16 chars)" autocomplete="off">
+              <input id="newIp" type="text" placeholder="Local IP (e.g. 192.168.1.50)" autocomplete="off">
+              <input id="newName" type="text" placeholder="Friendly Name (Optional)" autocomplete="off">
+              <select id="newType">
+                <option value="TypeB">Type B (Modern DP 20-27)</option>
+                <option value="TypeA">Type A (Legacy DP 1-5)</option>
+              </select>
+              <select id="newVersion">
+                <option value="3.5" selected>Protocol v3.5</option>
+                <option value="3.3">Protocol v3.3</option>
+                <option value="3.4">Protocol v3.4</option>
+                <option value="3.1">Protocol v3.1</option>
+              </select>
+              <button id="addBulbBtn" onclick="submitNewBulb()" class="btn btn-primary" style="grid-column: 1 / -1;">
+                <span>Add to Fleet</span>
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   </div>
 
-  <!-- Mobile sticky bottom bar -->
-  <aside class="mobile-bar">
-    <div class="mobile-bar-info">
-      <div id="mobilePulseDot" class="pulse-indicator"></div>
-      <span id="mobileStatusText">Beat Sync Inactive</span>
+  <!-- ZONE C: LOCKED-GEOMETRY FOOTER STATUS BAR (INSTRUMENT & VOCAL) -->
+  <footer class="locked-status-bar studio-chrome">
+    <div class="bar-cell bar-cell-gate" title="Noise Gate dBFS Threshold and Live Input Level">
+      <div class="bar-led" id="footerGateLed"></div>
+      <span id="footerGateText">GATE CLOSED -60.0 dB</span>
     </div>
-    <button id="mobileSyncBtn" class="btn btn-primary btn-sm">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-      <span>Sync</span>
-    </button>
-  </aside>
+
+    <div class="bar-cell bar-cell-inst" title="Isolated Instrument Energy (Drums, Bass, Guitars, Synths)">
+      <span class="inst-label-full" style="color:var(--text-muted);">INSTRUMENT</span>
+      <span class="inst-label-short" style="color:var(--text-muted);">INST</span>
+      <div class="bar-progress-track">
+        <div class="bar-progress-fill" id="footerInstFill"></div>
+      </div>
+      <span id="footerInstVal" style="width:3.2ch; text-align:right;">0%</span>
+    </div>
+
+    <div class="bar-cell bar-cell-vocal" title="Isolated Vocal Harmonic Formant Energy">
+      <span style="color:var(--text-muted);">VOCAL</span>
+      <div class="bar-progress-track">
+        <div class="bar-progress-fill" id="footerVocalFill" style="background:var(--accent-secondary);"></div>
+      </div>
+      <span id="footerVocalVal" style="width:3.2ch; text-align:right;">0%</span>
+    </div>
+
+    <div class="bar-cell bar-cell-color" title="Current Active Bulb Color">
+      <div class="bar-swatch" id="footerColorSwatch"></div>
+      <span id="footerHexVal">#F59E0B</span>
+    </div>
+
+    <div class="bar-cell bar-cell-agc" title="Dynamic AGC Gain Multiplier">
+      <span style="color:var(--text-muted);">AGC</span>
+      <span id="footerAgcVal" style="color:var(--text-primary);">1.0x</span>
+    </div>
+
+    <div class="bar-cell bar-cell-fps" style="justify-self:end;">
+      <span id="fpsVal" style="color:var(--text-muted);">60</span>
+      <span style="color:var(--text-muted);">FPS</span>
+    </div>
+  </footer>
 
   <script>
-    // Global State
+    const STORAGE_KEY = 'iot_bulb_sync_v2_settings';
+    const FLEET_CACHE_KEY = 'iot_bulb_sync_v2_fleet';
+
     let isSyncing = false;
+    let activeStageMode = 'BeatSync';
+
     let syncSettings = {
+      engine_mode: 'BeatSync',
       palette: 'Cyberpunk',
+      custom_palette: [
+        { h: 35, s: 0.95, v: 0.95 },
+        { h: 345, s: 0.90, v: 0.95 },
+        { h: 235, s: 0.85, v: 0.95 },
+        { h: 155, s: 0.85, v: 0.85 },
+        { h: 185, s: 0.95, v: 0.95 },
+        { h: 275, s: 0.85, v: 0.95 }
+      ],
       ambience_mode: 'DarkMode',
       master_brightness: 1.0,
-      smooth_transitions: true,
+      transition_mode: 'Auto',
+      invert_auto_gradual: false,
+      transition_speed: 0.65,
+      color_frequency: 0.70,
       auto_normalize: true,
-      audio_device: null
+      noise_gate_db: -45.0,
+      sensitivity: 1.0,
+      focus_mode: 'FullMix',
+      audio_device: null,
+      imax_display: 0,
+      imax_fps: 20,
+      imax_smoothing: 0.82,
+      imax_saturation_boost: 1.35,
+      imax_color_mode: 'Prominent'
     };
 
     let telemetry = {
+      engine_mode: 'BeatSync',
+      imax_cli_active: false,
       is_kick: false,
       is_snare: false,
+      is_vocal_onset: false,
+      has_instruments: false,
+      instrument_score: 0,
+      active_gradual: true,
+      current_db: -60.0,
+      gate_open: false,
       bass_intensity: 0,
       snare_intensity: 0,
+      instrument_intensity: 0,
+      vocal_intensity: 0,
       overall_energy: 0,
-      active_hue: 180,
+      active_hue: 35,
       active_brightness: 500,
-      active_rgb: [0, 240, 255],
+      active_rgb: [245, 158, 11],
       agc_gain: 1.0
     };
 
-    // Palettes for idle mode breathing
-    const PALETTE_HUES = {
-      'Cyberpunk': [180, 300, 270, 210, 330],
-      'Synthwave': [25, 330, 280, 45, 310],
-      'ClubRave': [0, 120, 240, 60, 180, 300],
-      'Vaporwave': [320, 180, 260, 30, 200],
-      'AmbientChill': [140, 200, 40, 170, 220]
-    };
-
-    // DOM Elements
-    const mainSyncBtn = document.getElementById('mainSyncBtn');
-    const mainSyncLabel = document.getElementById('mainSyncLabel');
-    const mobileSyncBtn = document.getElementById('mobileSyncBtn');
-    const mobileStatusText = document.getElementById('mobileStatusText');
-    const mobilePulseDot = document.getElementById('mobilePulseDot');
-    const audioSelect = document.getElementById('audioSelect');
-    const paletteSelect = document.getElementById('paletteSelect');
-    const masterBrightnessSlider = document.getElementById('masterBrightnessSlider');
-    const masterBrightnessVal = document.getElementById('masterBrightnessVal');
-    const ambienceDarkBtn = document.getElementById('ambienceDarkBtn');
-    const ambienceLightBtn = document.getElementById('ambienceLightBtn');
-    const agcToggle = document.getElementById('agcToggle');
-    const smoothToggle = document.getElementById('smoothToggle');
-    const bulbList = document.getElementById('bulbList');
-    const discoveredList = document.getElementById('discoveredList');
-    const scanLanBtn = document.getElementById('scanLanBtn');
-
-    // HUD Elements
-    const hudKickPill = document.getElementById('hudKickPill');
-    const hudSnarePill = document.getElementById('hudSnarePill');
-    const kickVal = document.getElementById('kickVal');
-    const snareVal = document.getElementById('snareVal');
-    const bassVal = document.getElementById('bassVal');
-    const energyVal = document.getElementById('energyVal');
-    const agcVal = document.getElementById('agcVal');
-    const fpsVal = document.getElementById('fpsVal');
-    const hexVal = document.getElementById('hexVal');
-    const liveColorDot = document.getElementById('liveColorDot');
-
-    // Accordion toggle
-    function toggleAddBulbAccordion() {
-      const body = document.getElementById('addBulbBody');
-      const chevron = document.getElementById('accordionChevron');
-      if (body.classList.contains('open')) {
-        body.classList.remove('open');
-        chevron.style.transform = 'rotate(0deg)';
-      } else {
-        body.classList.add('open');
-        chevron.style.transform = 'rotate(180deg)';
+    // Damped Harmonic Oscillator Spring Solver
+    class SpringValue {
+      constructor(initial = 0, stiffness = 240, damping = 18, mass = 1) {
+        this.value = initial;
+        this.target = initial;
+        this.velocity = 0;
+        this.stiffness = stiffness;
+        this.damping = damping;
+        this.mass = mass;
+      }
+      impulse(deltaVelocity) {
+        this.velocity += deltaVelocity;
+      }
+      step(dt) {
+        const safeDt = Math.min(dt, 0.05);
+        const force = -this.stiffness * (this.value - this.target);
+        const dampingForce = -this.damping * this.velocity;
+        const accel = (force + dampingForce) / this.mass;
+        this.velocity += accel * safeDt;
+        this.value += this.velocity * safeDt;
+        return this.value;
       }
     }
 
-    // Three.js Full-Viewport 3D Background Visualizer
+    const kickSpring = new SpringValue(0, 320, 20, 1);
+    const instSpring = new SpringValue(0.1, 180, 16, 1);
+    const vocalSpring = new SpringValue(0.05, 160, 16, 1);
+    const cameraFovSpring = new SpringValue(60, 240, 20, 1);
+
+    // =========================================================================
+    // 100% GPU-DRIVEN THREE.JS CUSTOM SHADER VISUALIZER (ZERO CPU VERTEX LOOPS!)
+    // =========================================================================
     const canvas = document.getElementById('threeCanvas');
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      alpha: false,
+      powerPreference: 'high-performance'
+    });
     const isMobile = window.innerWidth < 768;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.0));
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x08090C, 1.0);
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.set(0, -18, 14);
     camera.rotation.x = 0.95;
 
-    // Lighting setup
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.20);
-    scene.add(ambientLight);
+    // 1. GPU Terrain ShaderMaterial (All wave displacement & shockwave rings run in Vertex Shader!)
+    const segs = isMobile ? 48 : 84;
+    const terrainGeo = new THREE.PlaneGeometry(86, 86, segs, segs);
 
-    const primaryLight = new THREE.PointLight(0x00f0ff, 3.0, 100);
-    primaryLight.position.set(0, 5, 12);
-    scene.add(primaryLight);
+    const terrainUniforms = {
+      uTime: { value: 0.0 },
+      uInstrument: { value: 0.1 },
+      uVocal: { value: 0.05 },
+      uKickImpulse: { value: 0.0 },
+      uShockRadius: { value: 0.0 },
+      uShockIntensity: { value: 0.0 },
+      uColorPrimary: { value: new THREE.Color(0x00F0FF) },
+      uColorSecondary: { value: new THREE.Color(0x6366F1) },
+      uAmbientBoost: { value: 0.0 }
+    };
 
-    const secondaryLight = new THREE.PointLight(0xff007f, 2.0, 90);
-    secondaryLight.position.set(0, -20, 8);
-    scene.add(secondaryLight);
+    const terrainVertexShader = `
+      uniform float uTime;
+      uniform float uInstrument;
+      uniform float uVocal;
+      uniform float uKickImpulse;
+      uniform float uShockRadius;
+      uniform float uShockIntensity;
+      varying float vElevation;
+      varying float vDist;
 
-    // Procedural Undulating Terrain Plane
-    const segs = isMobile ? 36 : 64;
-    const terrainGeo = new THREE.PlaneGeometry(80, 80, segs, segs);
-    const terrainMat = new THREE.MeshStandardMaterial({
-      color: 0x00f0ff,
+      void main() {
+        vec3 pos = position;
+        float dist = length(pos.xy);
+        vDist = dist;
+
+        float wave1 = sin(pos.x * 0.13 + uTime * 1.35) * cos(pos.y * 0.13 + uTime * 1.10);
+        float wave2 = sin(pos.x * 0.27 - uTime * 0.85 + pos.y * 0.19) * 0.55;
+        float amp = 1.15 + uInstrument * 3.8 + uKickImpulse * 2.2;
+        float z = wave1 * amp + wave2 * (0.8 + uVocal * 2.4);
+
+        if (uShockRadius > 0.01) {
+          float ringDiff = abs(dist - uShockRadius);
+          if (ringDiff < 5.0) {
+            z += (1.0 - ringDiff / 5.0) * uShockIntensity;
+          }
+        }
+
+        pos.z += z;
+        vElevation = z;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+      }
+    `;
+
+    const terrainFragmentShader = `
+      uniform vec3 uColorPrimary;
+      uniform vec3 uColorSecondary;
+      uniform float uAmbientBoost;
+      varying float vElevation;
+      varying float vDist;
+
+      void main() {
+        float mixFactor = clamp((vElevation + 3.0) / 6.5, 0.0, 1.0);
+        vec3 col = mix(uColorSecondary, uColorPrimary, mixFactor);
+        float edgeFade = 1.0 - smoothstep(22.0, 44.0, vDist);
+        float alpha = (0.42 + mixFactor * 0.36 + uAmbientBoost * 0.2) * edgeFade;
+        gl_FragColor = vec4(col, alpha);
+      }
+    `;
+
+    const terrainMat = new THREE.ShaderMaterial({
+      uniforms: terrainUniforms,
+      vertexShader: terrainVertexShader,
+      fragmentShader: terrainFragmentShader,
       wireframe: true,
       transparent: true,
-      opacity: 0.70,
-      roughness: 0.25,
-      metalness: 0.8
+      depthWrite: false
     });
     const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
     scene.add(terrainMesh);
 
-    // Sub-surface dark water bed beneath the wireframe
-    const bedMat = new THREE.MeshBasicMaterial({ color: 0x03050a, transparent: true, opacity: 0.85 });
-    const bedMesh = new THREE.Mesh(terrainGeo, bedMat);
-    bedMesh.position.z = -0.5;
-    scene.add(bedMesh);
-
-    // Particle Constellation Field
+    // 2. GPU Circular Soft-Orb Particle System (100% Vertex Shader drift + Fragment Shader circular SDF!)
     const particleCount = isMobile ? 700 : 1800;
     const particleGeo = new THREE.BufferGeometry();
-    const particlePositions = new Float32Array(particleCount * 3);
-    const particleVelocities = [];
+    const pOrigins = new Float32Array(particleCount * 3);
+    const pVelocities = new Float32Array(particleCount * 3);
+    const pScales = new Float32Array(particleCount);
 
     for (let i = 0; i < particleCount; i++) {
-      particlePositions[i * 3] = (Math.random() - 0.5) * 80;
-      particlePositions[i * 3 + 1] = (Math.random() - 0.5) * 80;
-      particlePositions[i * 3 + 2] = Math.random() * 25 - 2;
-      particleVelocities.push({
-        x: (Math.random() - 0.5) * 0.02,
-        y: (Math.random() - 0.5) * 0.02,
-        z: Math.random() * 0.03 + 0.01
-      });
-    }
-    particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+      pOrigins[i * 3]     = (Math.random() - 0.5) * 84.0;
+      pOrigins[i * 3 + 1] = (Math.random() - 0.5) * 84.0;
+      pOrigins[i * 3 + 2] = Math.random() * 26.0 - 2.0;
 
-    const particleMat = new THREE.PointsMaterial({
-      color: 0x00f0ff,
-      size: isMobile ? 0.35 : 0.45,
+      pVelocities[i * 3]     = (Math.random() - 0.5) * 0.7;
+      pVelocities[i * 3 + 1] = (Math.random() - 0.5) * 0.7;
+      pVelocities[i * 3 + 2] = Math.random() * 1.1 + 0.35;
+
+      pScales[i] = Math.random() * 0.75 + 0.45;
+    }
+
+    particleGeo.setAttribute('position', new THREE.BufferAttribute(pOrigins, 3));
+    particleGeo.setAttribute('aVelocity', new THREE.BufferAttribute(pVelocities, 3));
+    particleGeo.setAttribute('aScale', new THREE.BufferAttribute(pScales, 1));
+
+    const particleUniforms = {
+      uTime: { value: 0.0 },
+      uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2.0) },
+      uColorPrimary: { value: new THREE.Color(0x00F0FF) },
+      uColorSecondary: { value: new THREE.Color(0xF59E0B) },
+      uEnergy: { value: 0.15 }
+    };
+
+    const particleVertexShader = `
+      attribute vec3 aVelocity;
+      attribute float aScale;
+      uniform float uTime;
+      uniform float uPixelRatio;
+      uniform float uEnergy;
+      varying float vAlpha;
+      varying float vColorMix;
+
+      void main() {
+        vec3 pos = position;
+        float speed = uTime * (1.0 + uEnergy * 0.45);
+        pos.x = mod(pos.x + aVelocity.x * speed + 42.0, 84.0) - 42.0;
+        pos.y = mod(pos.y + aVelocity.y * speed + 42.0, 84.0) - 42.0;
+        pos.z = mod(pos.z + aVelocity.z * speed + 2.0, 26.0) - 2.0;
+
+        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+
+        float dist = -mvPosition.z;
+        gl_PointSize = clamp((18.0 * aScale * uPixelRatio * (1.0 + uEnergy * 0.5)) / max(dist, 1.0), 2.0, 22.0);
+        vAlpha = smoothstep(26.0, 14.0, pos.z) * smoothstep(-2.0, 2.5, pos.z);
+        vColorMix = aScale;
+      }
+    `;
+
+    // Fragment shader renders a smooth anti-aliased CIRCLE (never a square!)
+    const particleFragmentShader = `
+      uniform vec3 uColorPrimary;
+      uniform vec3 uColorSecondary;
+      varying float vAlpha;
+      varying float vColorMix;
+
+      void main() {
+        vec2 uv = gl_PointCoord - vec2(0.5);
+        float d = length(uv);
+        if (d > 0.5) discard;
+
+        // Soft circular core + radial halo
+        float circle = smoothstep(0.5, 0.10, d);
+        vec3 col = mix(uColorPrimary, uColorSecondary, vColorMix);
+        gl_FragColor = vec4(col, circle * vAlpha * 0.85);
+      }
+    `;
+
+    const particleMat = new THREE.ShaderMaterial({
+      uniforms: particleUniforms,
+      vertexShader: particleVertexShader,
+      fragmentShader: particleFragmentShader,
       transparent: true,
-      opacity: 0.65,
+      depthWrite: false,
       blending: THREE.AdditiveBlending
     });
     const particleSystem = new THREE.Points(particleGeo, particleMat);
     scene.add(particleSystem);
 
-    // Shockwave ripple physics
-    let shockwaveRadius = 0;
-    let shockwaveSpeed = 0;
-    let shockwaveIntensity = 0;
-    let targetCameraFov = 60;
-
-    // Handle Resize
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
+      particleUniforms.uPixelRatio.value = Math.min(window.devicePixelRatio || 1, 2.0);
     });
 
-    // FPS Measurement
+    let shockwaveRadius = 0.0;
+    let shockwaveIntensity = 0.0;
+    let lastRenderTime = performance.now();
     let frameCount = 0;
     let lastFpsTime = performance.now();
-
-    // Visualizer Render Loop
     const clock = new THREE.Clock();
+    const currentPrimaryColor = new THREE.Color(0x00F0FF);
+    const targetPrimaryColor = new THREE.Color(0x00F0FF);
+    const currentSecondaryColor = new THREE.Color(0x6366F1);
 
     function render3D() {
       if (document.hidden) {
@@ -887,154 +1908,278 @@
         return;
       }
 
-      const elapsed = clock.getElapsedTime();
-      frameCount++;
       const now = performance.now();
+      const dt = Math.min((now - lastRenderTime) / 1000, 0.05);
+      lastRenderTime = now;
+
+      frameCount++;
       if (now - lastFpsTime >= 1000) {
-        fpsVal.innerText = frameCount;
+        document.getElementById('fpsVal').innerText = frameCount;
         frameCount = 0;
         lastFpsTime = now;
       }
 
-      // Calculate Target Colors & Ambient Levels
-      let currentColor = new THREE.Color(0x00f0ff);
-      if (isSyncing) {
+      const elapsed = clock.getElapsedTime();
+      instSpring.target = isSyncing ? telemetry.instrument_intensity : 0.12;
+      vocalSpring.target = isSyncing ? telemetry.vocal_intensity : 0.08;
+
+      kickSpring.step(dt);
+      instSpring.step(dt);
+      vocalSpring.step(dt);
+      cameraFovSpring.step(dt);
+
+      if (isSyncing || telemetry.imax_cli_active) {
         const [r, g, b] = telemetry.active_rgb;
-        currentColor.setRGB(r / 255, g / 255, b / 255);
+        targetPrimaryColor.setRGB(r / 255, g / 255, b / 255);
       } else {
-        // Idle breathing: harmonic cycle through active palette
-        const hues = PALETTE_HUES[syncSettings.palette] || PALETTE_HUES['Cyberpunk'];
-        const idleHueIdx = Math.floor((elapsed * 0.25) % hues.length);
-        const nextHueIdx = (idleHueIdx + 1) % hues.length;
-        const frac = (elapsed * 0.25) % 1;
-        const blendedHue = hues[idleHueIdx] + (hues[nextHueIdx] - hues[idleHueIdx]) * frac;
-        currentColor.setHSL(blendedHue / 360, 0.95, 0.55);
+        const idleHue = ((elapsed * 18) % 360) / 360;
+        targetPrimaryColor.setHSL(idleHue, 0.85, 0.52);
       }
 
-      // Update Three.js Materials & Lights
-      terrainMat.color.lerp(currentColor, 0.15);
-      particleMat.color.lerp(currentColor, 0.15);
-      primaryLight.color.lerp(currentColor, 0.15);
+      currentPrimaryColor.lerp(targetPrimaryColor, 1.0 - Math.exp(-10.0 * dt));
+      currentSecondaryColor.copy(currentPrimaryColor).offsetHSL(0.42, 0.0, -0.08);
 
-      // Complementary Rim Light
-      const compColor = currentColor.clone().offsetHSL(0.5, 0, 0);
-      secondaryLight.color.lerp(compColor, 0.15);
-
-      // Ambient Light based on Bulb Ambience Mode
-      const targetAmbient = (syncSettings.ambience_mode === 'LightMode') ? 0.65 : 0.20;
-      ambientLight.intensity += (targetAmbient - ambientLight.intensity) * 0.05;
-
-      // Primary Light Pulse on Kicks
-      const targetPrimaryInt = isSyncing ? (2.0 + telemetry.bass_intensity * 4.0) : 1.5;
-      primaryLight.intensity += (targetPrimaryInt - primaryLight.intensity) * 0.20;
-
-      // Camera FOV Kick Pulse
-      if (isSyncing && telemetry.is_kick) {
-        targetCameraFov = 63.5;
-      } else {
-        targetCameraFov = 60.0;
-      }
-      camera.fov += (targetCameraFov - camera.fov) * 0.12;
-      camera.updateProjectionMatrix();
-
-      // Terrain Vertex Wave Undulation
-      const posAttr = terrainGeo.attributes.position;
-      const count = posAttr.count;
-      const speed = isSyncing ? 1.5 : 0.5;
-      const bassValNum = isSyncing ? telemetry.bass_intensity : 0.1;
-      const energyValNum = isSyncing ? telemetry.overall_energy : 0.1;
-
-      // Advance shockwave
-      if (shockwaveRadius > 0) {
-        shockwaveRadius += shockwaveSpeed;
-        shockwaveIntensity *= 0.94;
-        if (shockwaveIntensity < 0.05) shockwaveRadius = 0;
+      if (shockwaveRadius > 0.0) {
+        shockwaveRadius += 26.0 * dt;
+        shockwaveIntensity *= Math.pow(0.06, dt);
+        if (shockwaveIntensity < 0.04) shockwaveRadius = 0.0;
       }
 
-      for (let i = 0; i < count; i++) {
-        const u = posAttr.getX(i);
-        const v = posAttr.getY(i);
-
-        let z = Math.sin(u * 0.13 + elapsed * speed) * Math.cos(v * 0.13 + elapsed * speed * 0.85) * (1.2 + bassValNum * 4.2);
-        z += Math.sin(u * 0.24 - elapsed * speed * 0.6) * 0.5 * (1.0 + energyValNum * 2.2);
-
-        if (shockwaveRadius > 0) {
-          const dist = Math.hypot(u, v);
-          const diff = Math.abs(dist - shockwaveRadius);
-          if (diff < 4.5) {
-            z += (1.0 - diff / 4.5) * shockwaveIntensity;
-          }
-        }
-        posAttr.setZ(i, z);
+      if (Math.abs(camera.fov - cameraFovSpring.value) > 0.01) {
+        camera.fov = cameraFovSpring.value;
+        camera.updateProjectionMatrix();
       }
-      posAttr.needsUpdate = true;
 
-      // Update Particle Constellation
-      const pPos = particleGeo.attributes.position;
-      const velMultiplier = isSyncing ? (1.0 + telemetry.overall_energy * 3.0) : 0.8;
-      for (let i = 0; i < particleCount; i++) {
-        let pz = pPos.getZ(i);
-        pz += particleVelocities[i].z * velMultiplier;
-        if (pz > 24) pz = -2;
-        pPos.setZ(i, pz);
+      // Update GPU Uniforms only (0 CPU vertex loops!)
+      terrainUniforms.uTime.value = elapsed;
+      terrainUniforms.uInstrument.value = instSpring.value;
+      terrainUniforms.uVocal.value = vocalSpring.value;
+      terrainUniforms.uKickImpulse.value = kickSpring.value;
+      terrainUniforms.uShockRadius.value = shockwaveRadius;
+      terrainUniforms.uShockIntensity.value = shockwaveIntensity;
+      terrainUniforms.uColorPrimary.value.copy(currentPrimaryColor);
+      terrainUniforms.uColorSecondary.value.copy(currentSecondaryColor);
+      terrainUniforms.uAmbientBoost.value = (syncSettings.ambience_mode === 'LightMode') ? 1.0 : 0.0;
 
-        let px = pPos.getX(i) + particleVelocities[i].x * velMultiplier;
-        let py = pPos.getY(i) + particleVelocities[i].y * velMultiplier;
-        if (px > 40) px = -40; if (px < -40) px = 40;
-        if (py > 40) py = -40; if (py < -40) py = 40;
-        pPos.setX(i, px);
-        pPos.setY(i, py);
-      }
-      pGeoNeedUpdate: particleGeo.attributes.position.needsUpdate = true;
+      particleUniforms.uTime.value = elapsed;
+      particleUniforms.uColorPrimary.value.copy(currentPrimaryColor);
+      particleUniforms.uColorSecondary.value.copy(currentSecondaryColor);
+      particleUniforms.uEnergy.value = isSyncing ? telemetry.overall_energy : 0.15;
 
       renderer.render(scene, camera);
       requestAnimationFrame(render3D);
     }
     requestAnimationFrame(render3D);
 
+    // =========================================================================
+    // INTERACTIVE 360° CONIC + RADIAL HSV/WHITE COLOR WHEEL STUDIO
+    // =========================================================================
+    let wheelTargetContext = null; // { type: 'bulb', id: '...' } | { type: 'broadcast' } | { type: 'palette', index: N }
+    let wheelHue = 35;
+    let wheelSat = 0.95;
+    let wheelVal = 1.0;
+    let isDraggingWheel = false;
+
+    function initColorWheelCanvas() {
+      const c = document.getElementById('colorWheelCanvas');
+      const ctx = c.getContext('2d');
+      const w = c.width, h = c.height;
+      const cx = w / 2, cy = h / 2, radius = w / 2;
+      const img = ctx.createImageData(w, h);
+      const data = img.data;
+
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const dx = x - cx;
+          const dy = y - cy;
+          const dist = Math.hypot(dx, dy);
+          const idx = (y * w + x) * 4;
+          if (dist > radius) {
+            data[idx + 3] = 0;
+            continue;
+          }
+          const sat = Math.min(1.0, dist / radius);
+          let angle = Math.atan2(dy, dx) * (180 / Math.PI);
+          if (angle < 0) angle += 360;
+          const { r, g, b } = hsvToRgbObj(angle, sat, 1.0);
+          data[idx] = r;
+          data[idx + 1] = g;
+          data[idx + 2] = b;
+          data[idx + 3] = 255;
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+
+      const wrap = document.getElementById('wheelCanvasWrap');
+      const pickAtEvent = (e) => {
+        const rect = c.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const dx = clientX - rect.left - rect.width / 2;
+        const dy = clientY - rect.top - rect.height / 2;
+        const r = rect.width / 2;
+        const dist = Math.min(r, Math.hypot(dx, dy));
+        wheelSat = dist / r;
+        let angle = Math.atan2(dy, dx) * (180 / Math.PI);
+        if (angle < 0) angle += 360;
+        wheelHue = angle;
+        updateWheelUi();
+      };
+
+      wrap.addEventListener('mousedown', (e) => { isDraggingWheel = true; pickAtEvent(e); });
+      window.addEventListener('mousemove', (e) => { if (isDraggingWheel) pickAtEvent(e); });
+      window.addEventListener('mouseup', () => { isDraggingWheel = false; });
+      wrap.addEventListener('touchstart', (e) => { isDraggingWheel = true; pickAtEvent(e); e.preventDefault(); }, { passive: false });
+      window.addEventListener('touchmove', (e) => { if (isDraggingWheel) pickAtEvent(e); }, { passive: true });
+      window.addEventListener('touchend', () => { isDraggingWheel = false; });
+    }
+
+    function updateWheelUi() {
+      const r = 110;
+      const rad = wheelHue * (Math.PI / 180);
+      const px = 110 + Math.cos(rad) * (wheelSat * r);
+      const py = 110 + Math.sin(rad) * (wheelSat * r);
+      const reticle = document.getElementById('wheelReticle');
+      reticle.style.left = `${px}px`;
+      reticle.style.top = `${py}px`;
+
+      const hex = hsvToHex(wheelHue, wheelSat, wheelVal);
+      document.getElementById('wheelLivePreview').style.background = hex;
+      document.getElementById('wheelHexReadout').innerText = wheelSat < 0.06 ? `${hex} (WHITE)` : hex;
+    }
+
+    window.onWheelValueInput = (val) => {
+      wheelVal = parseInt(val) / 100;
+      document.getElementById('wheelValueReadout').innerText = `${val}%`;
+      document.getElementById('wheelValueFill').style.setProperty('--fill-pct', `${val}%`);
+      updateWheelUi();
+    };
+
+    window.setWheelPureWhite = () => {
+      wheelSat = 0.0;
+      wheelVal = 1.0;
+      document.getElementById('wheelValueSlider').value = 100;
+      onWheelValueInput(100);
+      updateWheelUi();
+    };
+
+    window.openColorWheelForBulb = (id, name) => {
+      wheelTargetContext = { type: 'bulb', id };
+      document.getElementById('wheelModalTitle').innerText = `Color & White Wheel — ${name}`;
+      document.getElementById('colorWheelModal').classList.add('open');
+      updateWheelUi();
+    };
+
+    window.openColorWheelForBroadcast = () => {
+      wheelTargetContext = { type: 'broadcast' };
+      document.getElementById('wheelModalTitle').innerText = 'Broadcast Color & White Wheel (All Bulbs)';
+      document.getElementById('colorWheelModal').classList.add('open');
+      updateWheelUi();
+    };
+
+    window.openColorWheelForPaletteSwatch = (index) => {
+      const sw = syncSettings.custom_palette[index] || { h: 35, s: 0.95, v: 1.0 };
+      wheelHue = sw.h;
+      wheelSat = sw.s;
+      wheelVal = sw.v;
+      document.getElementById('wheelValueSlider').value = Math.round(wheelVal * 100);
+      onWheelValueInput(Math.round(wheelVal * 100));
+      wheelTargetContext = { type: 'palette', index };
+      document.getElementById('wheelModalTitle').innerText = `Edit Beat Sync Swatch #${index + 1}`;
+      document.getElementById('colorWheelModal').classList.add('open');
+      updateWheelUi();
+    };
+
+    window.addCustomColorViaWheel = () => {
+      syncSettings.custom_palette.push({ h: Math.round(Math.random() * 360), s: 0.92, v: 1.0 });
+      renderCustomSwatches();
+      openColorWheelForPaletteSwatch(syncSettings.custom_palette.length - 1);
+    };
+
+    window.closeColorWheelModal = () => {
+      document.getElementById('colorWheelModal').classList.remove('open');
+      wheelTargetContext = null;
+    };
+
+    window.applyColorWheelSelection = async () => {
+      if (!wheelTargetContext) return;
+      const ctx = wheelTargetContext;
+      if (ctx.type === 'bulb') {
+        await fetch(`/api/bulbs/${ctx.id}/color`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ h: wheelHue, s: wheelSat, v: wheelVal })
+        });
+      } else if (ctx.type === 'broadcast') {
+        await fetch('/api/bulbs/broadcast/color', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ h: wheelHue, s: wheelSat, v: wheelVal })
+        });
+      } else if (ctx.type === 'palette') {
+        syncSettings.custom_palette[ctx.index] = { h: wheelHue, s: wheelSat, v: wheelVal };
+        renderCustomSwatches();
+        await updateSettingsOnServer({ custom_palette: syncSettings.custom_palette });
+      }
+      closeColorWheelModal();
+    };
+
     // WebSocket Telemetry Connection
+    let ws = null;
     function connectWs() {
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${proto}//${location.host}/ws`);
+      ws = new WebSocket(`${proto}//${location.host}/ws`);
 
       ws.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
           telemetry = data;
 
+          // If external CLI `iot-bulb-sync imax` is running, automatically switch UI to IMAX Mode!
+          if (data.imax_cli_active && activeStageMode !== 'Imax') {
+            switchStageMode('Imax', false);
+            document.getElementById('imaxBannerTitle').innerText = 'IMAX CLI Process Active — Live Control Mode';
+          }
+
           if (data.is_kick) {
+            kickSpring.impulse(3.5);
             shockwaveRadius = 1.0;
-            shockwaveSpeed = 1.2;
-            shockwaveIntensity = 3.5;
-            hudKickPill.classList.add('active-kick');
-            kickVal.innerText = 'HIT';
-          } else {
-            hudKickPill.classList.remove('active-kick');
-            kickVal.innerText = '-';
+            shockwaveIntensity = 3.2;
+            cameraFovSpring.value = 62.8;
+            cameraFovSpring.target = 60.0;
           }
 
-          if (data.is_snare) {
-            hudSnarePill.classList.add('active-snare');
-            snareVal.innerText = 'HIT';
+          // Update Locked-Geometry Footer Status Bar (INSTRUMENT & VOCAL)
+          const gateLed = document.getElementById('footerGateLed');
+          const gateText = document.getElementById('footerGateText');
+          if (data.gate_open) {
+            gateLed.className = 'bar-led open';
+            gateText.innerText = `GATE OPEN ${data.current_db.toFixed(1)} dB`;
           } else {
-            hudSnarePill.classList.remove('active-snare');
-            snareVal.innerText = '-';
+            gateLed.className = 'bar-led';
+            gateText.innerText = `GATE CLOSED ${data.current_db.toFixed(1)} dB`;
           }
 
-          bassVal.innerText = `${Math.round(data.bass_intensity * 100)}%`;
-          energyVal.innerText = `${Math.round(data.overall_energy * 100)}%`;
-          agcVal.innerText = `${data.agc_gain.toFixed(1)}x`;
+          const instPct = Math.round((data.instrument_intensity || 0) * 100);
+          document.getElementById('footerInstFill').style.width = `${instPct}%`;
+          document.getElementById('footerInstVal').innerText = `${instPct}%`;
+
+          const vocalPct = Math.round((data.vocal_intensity || 0) * 100);
+          document.getElementById('footerVocalFill').style.width = `${vocalPct}%`;
+          document.getElementById('footerVocalVal').innerText = `${vocalPct}%`;
 
           const [r, g, b] = data.active_rgb;
-          const rgbStr = `rgb(${r}, ${g}, ${b})`;
-          const hexStr = `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase()}`;
+          const hex = `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase()}`;
+          document.getElementById('footerColorSwatch').style.background = hex;
+          document.getElementById('footerHexVal').innerText = hex;
+          document.getElementById('footerAgcVal').innerText = `${data.agc_gain.toFixed(1)}x`;
 
-          hexVal.innerText = hexStr;
-          liveColorDot.style.background = rgbStr;
-          liveColorDot.style.boxShadow = `0 0 12px ${rgbStr}`;
-          mobilePulseDot.style.background = rgbStr;
-          mobilePulseDot.style.boxShadow = `0 0 12px ${rgbStr}`;
-          document.documentElement.style.setProperty('--live-glow', `rgba(${r}, ${g}, ${b}, 0.22)`);
+          const gateMin = -65, gateMax = -10;
+          const normDb = Math.max(0, Math.min(1, (data.current_db - gateMin) / (gateMax - gateMin)));
+          document.getElementById('liveDbMeterTick').style.left = `${normDb * 100}%`;
+          document.getElementById('noiseGateVal').innerText = `${syncSettings.noise_gate_db.toFixed(0)} dB (Live: ${data.current_db.toFixed(1)} dB)`;
+
+          updateAutoClassifierHud(data);
         } catch (_) {}
       };
 
@@ -1044,120 +2189,316 @@
     }
     connectWs();
 
-    // REST API Actions
-    async function loadAudioDevices() {
-      try {
-        const res = await fetch('/api/audio/devices');
-        const devs = await res.json();
-        audioSelect.innerHTML = devs.map(d =>
-          `<option value="${d.name}" ${d.is_default ? 'selected' : ''}>${d.name} ${d.is_default ? '(Default)' : ''}</option>`
-        ).join('');
-      } catch (_) {}
-    }
+    function updateAutoClassifierHud(data) {
+      const scorePct = Math.round((data.instrument_score || 0) * 100);
+      document.getElementById('autoInstMeterFill').style.width = `${scorePct}%`;
+      document.getElementById('autoInstScoreVal').innerText = `${String(scorePct).padStart(2, '0')}%`;
 
-    async function loadBulbs() {
-      try {
-        const res = await fetch('/api/bulbs');
-        const bulbs = await res.json();
-        if (bulbs.length === 0) {
-          bulbList.innerHTML = '<p style="color:var(--text-muted); font-size:13px; padding:12px 0;">No bulbs added yet. Use the accordion below or scan your LAN.</p>';
-          return;
-        }
-        bulbList.innerHTML = bulbs.map(b => `
-          <div class="bulb-item">
-            <div class="bulb-row-top">
-              <div class="bulb-meta-title">
-                <span>${b.id}</span>
-                <span class="status-dot ${b.is_connected ? 'status-online' : 'status-offline'}">
-                  <svg width="6" height="6" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="12"/></svg>
-                  <span>${b.is_connected ? 'Online' : 'Offline'}</span>
-                </span>
-              </div>
-              <button onclick="deleteBulb('${b.id}')" class="btn btn-ghost btn-icon btn-sm" style="color:var(--danger);" title="Remove">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-              </button>
-            </div>
-            <div class="bulb-row-bottom">
-              <div class="bulb-info-sub">
-                <span>${b.address}</span>
-                <span class="bulb-sub-badge">${b.bulb_type}</span>
-              </div>
-              <div class="bulb-actions-wrap">
-                <button onclick="setBulbPower('${b.id}', true)" class="btn btn-ghost btn-sm">ON</button>
-                <button onclick="setBulbPower('${b.id}', false)" class="btn btn-ghost btn-sm">OFF</button>
-                <button onclick="setBulbColor('${b.id}', 180)" class="color-btn" style="background:#00f0ff;" title="Cyan"></button>
-                <button onclick="setBulbColor('${b.id}', 300)" class="color-btn" style="background:#ff007f;" title="Pink"></button>
-                <button onclick="setBulbColor('${b.id}', 45)" class="color-btn" style="background:#ffaa00;" title="Amber"></button>
-                <button onclick="setBulbWhite('${b.id}', 800)" class="btn btn-ghost btn-sm">White</button>
-              </div>
-            </div>
-          </div>
-        `).join('');
-      } catch (_) {}
-    }
-
-    async function setBulbPower(id, power) {
-      await fetch(`/api/bulbs/${id}/power`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ power })
-      });
-      loadBulbs();
-    }
-
-    async function setBulbColor(id, hue) {
-      await fetch(`/api/bulbs/${id}/color`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ h: hue, s: 1.0, v: 1.0 })
-      });
-    }
-
-    async function setBulbWhite(id, brightness) {
-      await fetch(`/api/bulbs/${id}/white`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ brightness, temp: 500 })
-      });
-    }
-
-    async function broadcastPower(power) {
-      await fetch('/api/bulbs/broadcast/power', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ power })
-      });
-    }
-
-    async function broadcastWhite(brightness, temp) {
-      await fetch('/api/bulbs/broadcast/white', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ brightness, temp })
-      });
-    }
-
-    async function deleteBulb(id) {
-      if (confirm(`Remove bulb ${id}?`)) {
-        await fetch(`/api/bulbs/${id}`, { method: 'DELETE' });
-        loadBulbs();
+      const led = document.getElementById('autoStateLed');
+      const text = document.getElementById('autoStateText');
+      if (data.has_instruments) {
+        led.classList.add('inst-active');
+        text.innerText = data.active_gradual
+          ? 'INSTRUMENTS / BEATS → GRADUAL ON'
+          : 'INSTRUMENTS / BEATS → GRADUAL OFF (JUMP)';
+      } else {
+        led.classList.remove('inst-active');
+        text.innerText = data.active_gradual
+          ? 'VOCALS / MICRO-FREQ → GRADUAL ON (SMOOTH)'
+          : 'VOCALS / MICRO-FREQ → GRADUAL OFF (GATED)';
       }
     }
 
-    // Toggle Sync Engine
-    async function toggleSyncState() {
+    // Stage Mode Switcher (BeatSync vs Imax)
+    window.switchStageMode = async (mode, persist = true) => {
+      activeStageMode = mode;
+      syncSettings.engine_mode = mode;
+
+      const ctrl = document.getElementById('modeControl');
+      ctrl.setAttribute('data-mode', mode);
+      ctrl.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+      });
+
+      // When in IMAX mode, show ONLY IMAX modifiable options (#deckImax + shared Physical Output card)
+      document.getElementById('deckBeatSync').style.display = (mode === 'BeatSync') ? 'block' : 'none';
+      document.getElementById('deckImax').style.display = (mode === 'Imax') ? 'block' : 'none';
+
+      if (persist) {
+        await updateSettingsOnServer({ engine_mode: mode });
+      }
+    };
+
+    window.toggleVisualizerOnly = (enable) => {
+      document.body.classList.toggle('visualizer-only', enable);
+      document.getElementById('exitVisBtn').style.display = enable ? 'flex' : 'none';
+    };
+
+    window.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+      if (e.key === 'v' || e.key === 'V') {
+        toggleVisualizerOnly(!document.body.classList.contains('visualizer-only'));
+      }
+      if (e.key === 'Escape') {
+        toggleVisualizerOnly(false);
+        closeColorWheelModal();
+      }
+    });
+
+    // IMAX Display Detection & Settings
+    window.loadImaxDisplays = async () => {
+      try {
+        const res = await fetch('/api/imax/displays');
+        const displays = await res.json();
+        const sel = document.getElementById('imaxDisplaySelect');
+        sel.innerHTML = displays.map(d =>
+          `<option value="${d.index}" ${d.index === syncSettings.imax_display ? 'selected' : ''}>${d.name}</option>`
+        ).join('');
+      } catch (_) {}
+    };
+
+    window.setImaxColorMode = async (mode) => {
+      syncSettings.imax_color_mode = mode;
+      const ctrl = document.getElementById('imaxColorModeControl');
+      ctrl.setAttribute('data-mode', mode);
+      ctrl.querySelectorAll('.seg-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('onclick').includes(mode));
+      });
+      document.getElementById('imaxColorModeBadge').innerText =
+        mode === 'Prominent' ? 'PROMINENT CLUSTER' : 'AMBIENT AVERAGE';
+      onImaxSliderInput();
+      await updateSettingsOnServer({ imax_color_mode: mode });
+    };
+
+    window.onImaxSliderInput = () => {
+      const fps = parseInt(document.getElementById('imaxFpsSlider').value);
+      const sat = (parseInt(document.getElementById('imaxSatSlider').value) / 100).toFixed(2);
+      const smoothPct = parseInt(document.getElementById('imaxSmoothSlider').value);
+      const disp = document.getElementById('imaxDisplaySelect').value || 0;
+      const modeFlag = syncSettings.imax_color_mode === 'AmbientAverage' ? 'ambient' : 'prominent';
+
+      document.getElementById('imaxFpsVal').innerText = `${fps} FPS`;
+      document.getElementById('imaxFpsFill').style.setProperty('--fill-pct', `${((fps - 8) / 22) * 100}%`);
+
+      document.getElementById('imaxSatVal').innerText = `${sat}x`;
+      document.getElementById('imaxSatFill').style.setProperty('--fill-pct', `${((sat * 100 - 100) / 100) * 100}%`);
+
+      document.getElementById('imaxSmoothVal').innerText = `${smoothPct}% ${smoothPct >= 70 ? '(Ultra-Fast Cut)' : '(Smooth)'}`;
+      document.getElementById('imaxSmoothFill').style.setProperty('--fill-pct', `${smoothPct}%`);
+
+      const cmd = `target/release/iot-bulb-sync imax --fps ${fps} --display ${disp} --smoothing ${(smoothPct / 100).toFixed(2)} --saturation-boost ${sat} --color-mode ${modeFlag}`;
+      document.getElementById('imaxCommandText').innerText = cmd;
+    };
+
+    window.onImaxSettingChange = async () => {
+      const fps = parseInt(document.getElementById('imaxFpsSlider').value);
+      const sat = parseInt(document.getElementById('imaxSatSlider').value) / 100;
+      const smooth = parseInt(document.getElementById('imaxSmoothSlider').value) / 100;
+      const disp = parseInt(document.getElementById('imaxDisplaySelect').value || '0');
+
+      syncSettings.imax_fps = fps;
+      syncSettings.imax_saturation_boost = sat;
+      syncSettings.imax_smoothing = smooth;
+      syncSettings.imax_display = disp;
+      onImaxSliderInput();
+
+      await updateSettingsOnServer({
+        imax_fps: fps,
+        imax_saturation_boost: sat,
+        imax_smoothing: smooth,
+        imax_display: disp
+      });
+    };
+
+    window.copyImaxCommand = () => {
+      const text = document.getElementById('imaxCommandText').innerText;
+      navigator.clipboard.writeText(text);
+      const btn = document.querySelector('.copy-cmd-btn');
+      btn.innerText = '✓ Copied!';
+      setTimeout(() => { btn.innerText = '📋 Copy'; }, 2000);
+    };
+
+    // Card 1: Audio Beat Sync Controls
+    window.setStemFocus = async (mode) => {
+      syncSettings.focus_mode = mode;
+      const ctrl = document.getElementById('stemFocusControl');
+      ctrl.setAttribute('data-mode', mode);
+      ctrl.querySelectorAll('.seg-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.val === mode);
+      });
+      document.getElementById('stemFocusBadge').innerText = mode.toUpperCase();
+      await updateSettingsOnServer({ focus_mode: mode });
+    };
+
+    window.onNoiseGateInput = (val) => {
+      const num = parseFloat(val);
+      syncSettings.noise_gate_db = num;
+      const normPct = ((num - (-65)) / ((-10) - (-65))) * 100;
+      document.getElementById('noiseGateFill').style.setProperty('--fill-pct', `${normPct}%`);
+      document.getElementById('noiseGateVal').innerText = `${num.toFixed(0)} dB (Live: ${telemetry.current_db.toFixed(1)} dB)`;
+    };
+
+    window.onNoiseGateChange = async (val) => {
+      await updateSettingsOnServer({ noise_gate_db: parseFloat(val) });
+    };
+
+    window.onSensitivityInput = (val) => {
+      const sens = (val / 100).toFixed(2);
+      syncSettings.sensitivity = parseFloat(sens);
+      const normPct = ((val - 20) / (300 - 20)) * 100;
+      document.getElementById('sensitivityFill').style.setProperty('--fill-pct', `${normPct}%`);
+      document.getElementById('sensitivityVal').innerText = `${sens}x`;
+    };
+
+    window.onSensitivityChange = async (val) => {
+      await updateSettingsOnServer({ sensitivity: parseFloat(val) / 100 });
+    };
+
+    // Card 2: Palette & Unlimited Custom Swatches
+    window.onPaletteChange = async () => {
+      const pal = document.getElementById('paletteSelect').value;
+      syncSettings.palette = pal;
+      document.getElementById('customSwatchWrap').style.display = (pal === 'Custom') ? 'flex' : 'none';
+      await updateSettingsOnServer({ palette: pal });
+    };
+
+    function renderCustomSwatches() {
+      const list = document.getElementById('swatchList');
+      list.innerHTML = syncSettings.custom_palette.map((c, i) => {
+        const hex = hsvToHex(c.h, c.s, c.v);
+        return `
+          <div class="swatch-item" onclick="openColorWheelForPaletteSwatch(${i})" title="Click to open 360° Color Wheel">
+            <div class="swatch-preview-dot" style="background:${hex};"></div>
+            <span class="swatch-hex">${hex}</span>
+            <button class="swatch-del" onclick="event.stopPropagation(); removeCustomColor(${i})">&times;</button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    window.removeCustomColor = async (index) => {
+      if (syncSettings.custom_palette.length <= 1) return;
+      syncSettings.custom_palette.splice(index, 1);
+      renderCustomSwatches();
+      await updateSettingsOnServer({ custom_palette: syncSettings.custom_palette });
+    };
+
+    window.setAmbienceMode = async (mode) => {
+      syncSettings.ambience_mode = mode;
+      const ctrl = document.getElementById('ambienceModeControl');
+      ctrl.setAttribute('data-mode', mode);
+      ctrl.querySelectorAll('.seg-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('onclick').includes(mode));
+      });
+      await updateSettingsOnServer({ ambience_mode: mode });
+    };
+
+    window.onBrightnessInput = (val) => {
+      document.getElementById('masterBrightnessVal').innerText = `${val}%`;
+      document.getElementById('masterBrightnessFill').style.setProperty('--fill-pct', `${val}%`);
+    };
+
+    window.onBrightnessChange = async (val) => {
+      syncSettings.master_brightness = val / 100;
+      await updateSettingsOnServer({ master_brightness: val / 100 });
+    };
+
+    window.setMasterBrightness = async (val) => {
+      document.getElementById('masterBrightnessSlider').value = val;
+      onBrightnessInput(val);
+      await onBrightnessChange(val);
+    };
+
+    // Card 3: Transition Controls
+    window.setTransitionMode = async (mode) => {
+      syncSettings.transition_mode = mode;
+      const ctrl = document.getElementById('transitionModeControl');
+      ctrl.setAttribute('data-mode', mode);
+      ctrl.querySelectorAll('.seg-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.val === mode);
+      });
+
+      const isAuto = mode === 'Auto';
+      const isOff = mode === 'Off';
+      document.getElementById('autoClassifierStrip').style.display = isAuto ? 'grid' : 'none';
+      document.getElementById('autoPolarityRow').style.display = isAuto ? 'flex' : 'none';
+      document.getElementById('transitionModeBadge').innerText =
+        isAuto ? 'AUTO • STEM' : (isOff ? 'INSTANT • JUMP' : 'GRADUAL • LERP');
+
+      const slidersGroup = document.getElementById('gradualSlidersGroup');
+      slidersGroup.style.opacity = isOff ? '0.40' : '1.0';
+      slidersGroup.style.pointerEvents = isOff ? 'none' : 'auto';
+
+      await updateSettingsOnServer({ transition_mode: mode });
+    };
+
+    window.toggleInvertAutoGradual = async (inverted) => {
+      syncSettings.invert_auto_gradual = inverted;
+      await updateSettingsOnServer({ invert_auto_gradual: inverted });
+    };
+
+    window.onSpeedInput = (val) => {
+      const pct = parseInt(val);
+      document.getElementById('transitionSpeedVal').innerText = `${pct}% ${pct > 60 ? '(Snappy)' : '(Smooth)'}`;
+      document.getElementById('transitionSpeedFill').style.setProperty('--fill-pct', `${pct}%`);
+    };
+
+    window.onSpeedChange = async (val) => {
+      syncSettings.transition_speed = parseInt(val) / 100;
+      await updateSettingsOnServer({ transition_speed: parseInt(val) / 100 });
+    };
+
+    window.onFreqInput = (val) => {
+      const pct = parseInt(val);
+      const ms = Math.round(320 - 225 * (pct / 100));
+      document.getElementById('colorFreqVal').innerText = `${pct}% (${ms}ms)`;
+      document.getElementById('colorFreqFill').style.setProperty('--fill-pct', `${pct}%`);
+    };
+
+    window.onFreqChange = async (val) => {
+      syncSettings.color_frequency = parseInt(val) / 100;
+      await updateSettingsOnServer({ color_frequency: parseInt(val) / 100 });
+    };
+
+    window.toggleAgc = async (enabled) => {
+      syncSettings.auto_normalize = enabled;
+      await updateSettingsOnServer({ auto_normalize: enabled });
+    };
+
+    async function updateSettingsOnServer(payload) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(syncSettings));
+      try {
+        await fetch('/api/sync/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (_) {}
+    }
+
+    // Start / Stop Sync
+    window.toggleSyncState = async () => {
       isSyncing = !isSyncing;
       if (isSyncing) {
         await fetch('/api/sync/start', {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            device: audioSelect.value,
-            palette: paletteSelect.value,
+            engine_mode: activeStageMode,
+            device: document.getElementById('audioSelect').value,
+            palette: syncSettings.palette,
             ambience_mode: syncSettings.ambience_mode,
             master_brightness: syncSettings.master_brightness,
-            smooth_transitions: syncSettings.smooth_transitions,
-            auto_normalize: syncSettings.auto_normalize
+            transition_mode: syncSettings.transition_mode,
+            auto_normalize: syncSettings.auto_normalize,
+            noise_gate_db: syncSettings.noise_gate_db,
+            sensitivity: syncSettings.sensitivity,
+            focus_mode: syncSettings.focus_mode,
+            imax_display: syncSettings.imax_display,
+            imax_fps: syncSettings.imax_fps,
+            imax_smoothing: syncSettings.imax_smoothing,
+            imax_saturation_boost: syncSettings.imax_saturation_boost,
+            imax_color_mode: syncSettings.imax_color_mode
           })
         });
         updateSyncUi(true);
@@ -1165,211 +2506,308 @@
         await fetch('/api/sync/stop', { method: 'POST' });
         updateSyncUi(false);
       }
-    }
+    };
 
     function updateSyncUi(running) {
       isSyncing = running;
+      const btn = document.getElementById('mainSyncBtn');
       if (running) {
-        mainSyncBtn.className = 'btn btn-stop';
-        mainSyncBtn.innerHTML = `
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/></svg>
-          <span>Stop Beat Sync</span>`;
-        mobileSyncBtn.className = 'btn btn-stop btn-sm';
-        mobileSyncBtn.innerHTML = `
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/></svg>
-          <span>Stop</span>`;
-        mobileStatusText.innerText = 'Sync Active';
-        mobilePulseDot.style.background = 'var(--accent)';
+        btn.className = 'btn btn-stop';
+        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/></svg><span>Stop Sync</span>`;
       } else {
-        mainSyncBtn.className = 'btn btn-primary';
-        mainSyncBtn.innerHTML = `
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          <span>Start Beat Sync</span>`;
-        mobileSyncBtn.className = 'btn btn-primary btn-sm';
-        mobileSyncBtn.innerHTML = `
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          <span>Sync</span>`;
-        mobileStatusText.innerText = 'Beat Sync Inactive';
-        mobilePulseDot.style.background = 'var(--text-muted)';
-        mobilePulseDot.style.boxShadow = 'none';
+        btn.className = 'btn btn-primary';
+        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>Start Sync</span>`;
       }
     }
 
-    mainSyncBtn.onclick = toggleSyncState;
-    mobileSyncBtn.onclick = toggleSyncState;
-
-    // Setting Updaters
-    paletteSelect.onchange = async () => {
-      syncSettings.palette = paletteSelect.value;
-      await fetch('/api/sync/settings', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ palette: paletteSelect.value })
-      });
-    };
-
-    masterBrightnessSlider.oninput = (e) => {
-      const val = parseInt(e.target.value);
-      masterBrightnessVal.innerText = `${val}%`;
-    };
-
-    masterBrightnessSlider.onchange = async (e) => {
-      const val = parseInt(e.target.value);
-      syncSettings.master_brightness = val / 100;
-      await fetch('/api/sync/settings', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ master_brightness: val / 100 })
-      });
-    };
-
-    window.setMasterBrightness = async (val) => {
-      masterBrightnessSlider.value = val;
-      masterBrightnessVal.innerText = `${val}%`;
-      syncSettings.master_brightness = val / 100;
-      await fetch('/api/sync/settings', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ master_brightness: val / 100 })
-      });
-    };
-
-    window.setAmbienceMode = async (mode) => {
-      syncSettings.ambience_mode = mode;
-      if (mode === 'DarkMode') {
-        ambienceDarkBtn.classList.add('active');
-        ambienceLightBtn.classList.remove('active');
-      } else {
-        ambienceLightBtn.classList.add('active');
-        ambienceDarkBtn.classList.remove('active');
-      }
-      await fetch('/api/sync/settings', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ ambience_mode: mode })
-      });
-    };
-
-    window.toggleAgc = async (enabled) => {
-      syncSettings.auto_normalize = enabled;
-      await fetch('/api/sync/settings', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ auto_normalize: enabled })
-      });
-    };
-
-    window.toggleSmooth = async (enabled) => {
-      syncSettings.smooth_transitions = enabled;
-      await fetch('/api/sync/settings', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ smooth_transitions: enabled })
-      });
-    };
-
-    document.getElementById('refreshAudioBtn').onclick = loadAudioDevices;
-
-    // Scan LAN handler
-    scanLanBtn.onclick = async () => {
-      scanLanBtn.disabled = true;
-      scanLanBtn.innerHTML = `
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1s linear infinite"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-        <span>Scanning LAN...</span>`;
+    // Fleet Management (Single Power Toggle + Full Color Wheel Trigger!)
+    async function loadBulbs() {
       try {
-        const res = await fetch('/api/devices/scan');
-        const devices = await res.json();
-        discoveredList.style.display = 'block';
-        if (devices.length === 0) {
-          discoveredList.innerHTML = '<div class="discovered-item" style="color:var(--text-muted)">No devices responded to UDP discovery probe.</div>';
-        } else {
-          discoveredList.innerHTML = `
-            <div style="font-size:12px; font-weight:700; color:var(--accent); margin-bottom:6px;">DISCOVERED ON NETWORK:</div>
-            ${devices.map(d => `
-              <div class="discovered-item">
-                <div><strong>${d.id}</strong> &bull; ${d.ip} (v${d.version})</div>
-                <button onclick="useDiscovered('${d.id}', '${d.ip}', '${d.version}')" class="btn btn-ghost btn-sm" style="min-height:30px; padding:0 8px; font-size:11px;">Use This</button>
+        const res = await fetch('/api/bulbs');
+        const bulbs = await res.json();
+        localStorage.setItem(FLEET_CACHE_KEY, JSON.stringify(bulbs));
+        renderBulbs(bulbs);
+      } catch (_) {
+        const cached = JSON.parse(localStorage.getItem(FLEET_CACHE_KEY) || '[]');
+        if (cached.length) renderBulbs(cached);
+      }
+    }
+
+    function renderBulbs(bulbs) {
+      const topBadge = document.getElementById('topFleetBadge');
+      const onlineCount = bulbs.filter(b => b.is_connected).length;
+      topBadge.innerText = `${onlineCount}/${bulbs.length} Online`;
+
+      const list = document.getElementById('bulbList');
+      if (bulbs.length === 0) {
+        list.innerHTML = '<p style="color:var(--text-muted); font-size:12px; padding:12px 0;">No bulbs configured. Use the form below or Scan LAN.</p>';
+        return;
+      }
+
+      list.innerHTML = bulbs.map(b => {
+        const name = b.name || `Smart Bulb (${b.id.slice(-4).toUpperCase()})`;
+        const macStr = b.mac ? ` • MAC: ${b.mac}` : '';
+        const isPowered = b.power !== false;
+        return `
+          <div class="bulb-card" id="card-${b.id}">
+            <div class="bulb-card-top">
+              <div>
+                <div class="bulb-name-area">
+                  <span class="bulb-title" id="title-${b.id}">${name}</span>
+                  <button class="bulb-edit-btn" onclick="startRenameBulb('${b.id}', '${name.replace(/'/g, "\\'")}')" title="Rename Bulb">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  </button>
+                </div>
+                <div class="bulb-meta">${b.address} • ${b.bulb_type}${macStr}</div>
               </div>
-            `).join('')}`;
-        }
-      } catch (err) {
-        discoveredList.style.display = 'block';
-        discoveredList.innerHTML = '<div class="discovered-item" style="color:var(--danger)">Scan request failed.</div>';
-      } finally {
-        scanLanBtn.disabled = false;
-        scanLanBtn.innerHTML = `
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>
-          <span>Scan Network</span>`;
+              <span class="status-badge ${b.is_connected ? 'online' : 'offline'}">
+                ● ${b.is_connected ? 'Online' : 'Offline'}
+              </span>
+            </div>
+            <div class="bulb-actions">
+              <div class="bulb-power-toggle-wrap">
+                <label class="switch" title="Toggle Bulb Power ON/OFF">
+                  <input type="checkbox" ${isPowered ? 'checked' : ''} onchange="setBulbPower('${b.id}', this.checked)">
+                  <span class="switch-slider"></span>
+                </label>
+                <span>${isPowered ? 'Power ON' : 'Power OFF'}</span>
+              </div>
+
+              <div style="display:flex; align-items:center; gap:8px;">
+                <button onclick="openColorWheelForBulb('${b.id}', '${name.replace(/'/g, "\\'")}')" class="btn btn-ghost btn-sm" title="Open Full 360° HSV &amp; White Color Wheel">
+                  🎨 Color &amp; White Wheel
+                </button>
+                <button onclick="deleteBulb('${b.id}')" class="btn btn-ghost btn-sm" style="color:var(--status-danger);" title="Remove Bulb">&times;</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    window.startRenameBulb = (id, curName) => {
+      const newName = prompt(`Enter friendly name for bulb ${id}:`, curName);
+      if (newName && newName.trim() && newName !== curName) {
+        renameBulb(id, newName.trim());
       }
     };
 
-    window.useDiscovered = (id, ip, version) => {
-      document.getElementById('newId').value = id;
-      document.getElementById('newIp').value = ip;
-      if (version && document.getElementById('newVersion')) {
-        document.getElementById('newVersion').value = version;
+    async function renameBulb(id, name) {
+      await fetch(`/api/bulbs/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      loadBulbs();
+    }
+
+    window.setBulbPower = async (id, power) => {
+      await fetch(`/api/bulbs/${id}/power`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ power })
+      });
+      loadBulbs();
+    };
+
+    window.deleteBulb = async (id) => {
+      if (confirm(`Remove bulb ${id}?`)) {
+        await fetch(`/api/bulbs/${id}`, { method: 'DELETE' });
+        loadBulbs();
       }
+    };
+
+    window.broadcastPower = async (power) => {
+      await fetch('/api/bulbs/broadcast/power', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ power })
+      });
+      loadBulbs();
+    };
+
+    window.toggleAddBulbAccordion = () => {
       const body = document.getElementById('addBulbBody');
-      if (!body.classList.contains('open')) toggleAddBulbAccordion();
-      document.getElementById('newKey').focus();
+      const chevron = document.getElementById('accordionChevron');
+      body.classList.toggle('open');
+      chevron.style.transform = body.classList.contains('open') ? 'rotate(180deg)' : 'rotate(0deg)';
     };
 
-    // Add Bulb form submit
-    document.getElementById('addBulbBtn').onclick = async () => {
+    window.submitNewBulb = async () => {
       const id = document.getElementById('newId').value.trim();
       const local_key = document.getElementById('newKey').value.trim();
       const address = document.getElementById('newIp').value.trim();
+      const name = document.getElementById('newName').value.trim() || undefined;
       const bulb_type = document.getElementById('newType').value;
-      const version = document.getElementById('newVersion') ? document.getElementById('newVersion').value : '3.5';
+      const version = document.getElementById('newVersion').value;
+
       if (!id || !local_key || !address) {
         alert('Please fill in Device ID, Local Key, and IP address.');
         return;
       }
+
       const btn = document.getElementById('addBulbBtn');
       btn.disabled = true;
       btn.innerText = 'Connecting...';
+
       try {
         const res = await fetch('/api/bulbs', {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ id, local_key, address, bulb_type, version })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, local_key, address, name, bulb_type, version })
         });
         if (res.ok) {
           document.getElementById('newId').value = '';
           document.getElementById('newKey').value = '';
           document.getElementById('newIp').value = '';
-          loadBulbs();
+          document.getElementById('newName').value = '';
           toggleAddBulbAccordion();
+          loadBulbs();
         } else {
-          const err = await res.text();
-          alert('Failed to connect bulb: ' + err);
+          alert('Failed to connect: ' + await res.text());
         }
-      } catch (err) {
-        alert('Network error connecting bulb.');
+      } catch (e) {
+        alert('Network error connecting to bulb');
       } finally {
         btn.disabled = false;
-        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span>Add to Fleet</span>`;
+        btn.innerText = 'Add to Fleet';
       }
     };
 
-    // Initialize application state
+    window.triggerLanScan = async () => {
+      const btn = document.getElementById('scanLanBtn');
+      btn.disabled = true;
+      btn.innerText = 'Scanning...';
+      const container = document.getElementById('discoveredList');
+      container.style.display = 'block';
+      container.innerHTML = '<div style="font-size:11px; color:var(--text-muted);">Probing UDP 6666/6667...</div>';
+
+      try {
+        const res = await fetch('/api/devices/scan');
+        const devices = await res.json();
+        if (devices.length === 0) {
+          container.innerHTML = '<div style="font-size:11px; color:var(--text-muted);">No responsive Tuya devices found.</div>';
+        } else {
+          container.innerHTML = devices.map(d => `
+            <div class="discovered-item">
+              <div>
+                <strong>${d.name || d.id}</strong> &bull; ${d.ip} (v${d.version})
+                ${d.mac ? `<br><span style="color:var(--text-muted); font-size:10px;">MAC: ${d.mac}</span>` : ''}
+              </div>
+              <button onclick="useDiscovered('${d.id}', '${d.ip}', '${d.version}', '${(d.name || '').replace(/'/g, "\\'")}')" class="btn btn-ghost btn-sm" style="height:24px; padding:0 8px; font-size:10px;">Use This</button>
+            </div>
+          `).join('');
+        }
+      } catch (err) {
+        container.innerHTML = '<div style="font-size:11px; color:var(--status-danger);">Scan failed.</div>';
+      } finally {
+        btn.disabled = false;
+        btn.innerText = 'Scan LAN';
+      }
+    };
+
+    window.useDiscovered = (id, ip, version, name) => {
+      document.getElementById('newId').value = id;
+      document.getElementById('newIp').value = ip;
+      if (document.getElementById('newVersion')) document.getElementById('newVersion').value = version || '3.5';
+      if (name && document.getElementById('newName')) document.getElementById('newName').value = name;
+      const body = document.getElementById('addBulbBody');
+      if (!body.classList.contains('open')) toggleAddBulbAccordion();
+      document.getElementById('newKey').focus();
+    };
+
+    async function loadAudioDevices() {
+      try {
+        const res = await fetch('/api/audio/devices');
+        const devs = await res.json();
+        const sel = document.getElementById('audioSelect');
+        sel.innerHTML = devs.map(d =>
+          `<option value="${d.name}" ${d.is_default ? 'selected' : ''}>${d.name} ${d.is_default ? '(Default)' : ''}</option>`
+        ).join('');
+      } catch (_) {}
+    }
+
+    window.onAudioDeviceChange = async () => {
+      const dev = document.getElementById('audioSelect').value;
+      syncSettings.audio_device = dev;
+      await updateSettingsOnServer({ audio_device: dev });
+    };
+
+    function hsvToRgbObj(h, s, v) {
+      const c = v * s;
+      const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+      const m = v - c;
+      let r = 0, g = 0, b = 0;
+      if (h < 60) { r = c; g = x; b = 0; }
+      else if (h < 120) { r = x; g = c; b = 0; }
+      else if (h < 180) { r = 0; g = c; b = x; }
+      else if (h < 240) { r = 0; g = x; b = c; }
+      else if (h < 300) { r = x; g = 0; b = c; }
+      else { r = c; g = 0; b = x; }
+      return {
+        r: Math.round((r + m) * 255),
+        g: Math.round((g + m) * 255),
+        b: Math.round((b + m) * 255)
+      };
+    }
+
+    function hsvToHex(h, s, v) {
+      const { r, g, b } = hsvToRgbObj(h, s, v);
+      const toHex = (n) => n.toString(16).padStart(2, '0');
+      return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+    }
+
+    // Initialize Application
     async function init() {
-      await loadAudioDevices();
-      await loadBulbs();
+      initColorWheelCanvas();
+      await Promise.all([loadAudioDevices(), loadImaxDisplays(), loadBulbs()]);
+
       try {
         const res = await fetch('/api/sync/status');
         const st = await res.json();
         updateSyncUi(st.running);
         if (st.settings) {
-          syncSettings = st.settings;
-          paletteSelect.value = st.settings.palette;
-          window.setAmbienceMode(st.settings.ambience_mode);
-          masterBrightnessSlider.value = Math.round(st.settings.master_brightness * 100);
-          masterBrightnessVal.innerText = `${Math.round(st.settings.master_brightness * 100)}%`;
-          agcToggle.checked = st.settings.auto_normalize;
-          smoothToggle.checked = st.settings.smooth_transitions;
+          syncSettings = Object.assign({}, syncSettings, st.settings);
         }
-      } catch (_) {}
+        if (st.imax_cli_active) {
+          syncSettings.engine_mode = 'Imax';
+        }
+      } catch (_) {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+        syncSettings = Object.assign({}, syncSettings, saved);
+      }
+
+      document.getElementById('paletteSelect').value = syncSettings.palette;
+      document.getElementById('customSwatchWrap').style.display = (syncSettings.palette === 'Custom') ? 'flex' : 'none';
+      renderCustomSwatches();
+
+      await switchStageMode(syncSettings.engine_mode || 'BeatSync', false);
+      setStemFocus(syncSettings.focus_mode || 'FullMix');
+      setAmbienceMode(syncSettings.ambience_mode || 'DarkMode');
+      setTransitionMode(syncSettings.transition_mode || 'Auto');
+      setImaxColorMode(syncSettings.imax_color_mode || 'Prominent');
+
+      document.getElementById('invertAutoGradualToggle').checked = syncSettings.invert_auto_gradual;
+      document.getElementById('agcToggle').checked = syncSettings.auto_normalize;
+
+      document.getElementById('noiseGateSlider').value = syncSettings.noise_gate_db;
+      onNoiseGateInput(syncSettings.noise_gate_db);
+
+      document.getElementById('sensitivitySlider').value = Math.round(syncSettings.sensitivity * 100);
+      onSensitivityInput(Math.round(syncSettings.sensitivity * 100));
+
+      document.getElementById('transitionSpeedSlider').value = Math.round(syncSettings.transition_speed * 100);
+      onSpeedInput(Math.round(syncSettings.transition_speed * 100));
+
+      document.getElementById('colorFreqSlider').value = Math.round(syncSettings.color_frequency * 100);
+      onFreqInput(Math.round(syncSettings.color_frequency * 100));
+
+      document.getElementById('imaxFpsSlider').value = syncSettings.imax_fps || 20;
+      document.getElementById('imaxSatSlider').value = Math.round((syncSettings.imax_saturation_boost || 1.35) * 100);
+      document.getElementById('imaxSmoothSlider').value = Math.round((syncSettings.imax_smoothing || 0.82) * 100);
+      onImaxSliderInput();
+
+      setMasterBrightness(Math.round(syncSettings.master_brightness * 100));
     }
     init();
   </script>

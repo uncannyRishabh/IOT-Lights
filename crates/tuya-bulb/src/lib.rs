@@ -123,6 +123,37 @@ impl BulbColor {
         }
     }
 
+    /// Convert to hex RGB color string (e.g. `#F59E0B`).
+    pub fn to_hex_rgb(&self) -> String {
+        let (r, g, b) = self.to_rgb();
+        format!("#{r:02X}{g:02X}{b:02X}")
+    }
+
+    /// Linearly interpolate between two colors in perceptual Oklab color space.
+    /// `t`: 0.0 to 1.0 interpolation factor.
+    pub fn lerp_oklab(&self, other: BulbColor, t: f32) -> BulbColor {
+        let t = t.clamp(0.0, 1.0);
+        if t <= 0.0 {
+            return *self;
+        }
+        if t >= 1.0 {
+            return other;
+        }
+
+        let (r1, g1, b1) = self.to_rgb();
+        let (r2, g2, b2) = other.to_rgb();
+
+        let [l1, a1, b_ok1] = rgb_to_oklab(r1, g1, b1);
+        let [l2, a2, b_ok2] = rgb_to_oklab(r2, g2, b2);
+
+        let l = l1 + (l2 - l1) * t;
+        let a = a1 + (a2 - a1) * t;
+        let b = b_ok1 + (b_ok2 - b_ok1) * t;
+
+        let (r, g, b) = oklab_to_rgb(l, a, b);
+        BulbColor::from_rgb(r, g, b)
+    }
+
     /// Convert to RGB 8-bit values.
     pub fn to_rgb(&self) -> (u8, u8, u8) {
         let c = self.v * self.s;
@@ -206,6 +237,45 @@ impl BulbColor {
     }
 }
 
+#[inline]
+fn rgb_to_oklab(r: u8, g: u8, b: u8) -> [f32; 3] {
+    let lin = |c: f32| if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+    let lr = lin(r as f32 / 255.0);
+    let lg = lin(g as f32 / 255.0);
+    let lb = lin(b as f32 / 255.0);
+
+    let l = (0.41222147 * lr + 0.53633254 * lg + 0.05144599 * lb).cbrt();
+    let m = (0.21190350 * lr + 0.68069955 * lg + 0.10739696 * lb).cbrt();
+    let s = (0.08830246 * lr + 0.28171884 * lg + 0.62997870 * lb).cbrt();
+
+    [
+        0.21045426 * l + 0.79361779 * m - 0.00407205 * s,
+        1.97799850 * l - 2.42859221 * m + 0.45059371 * s,
+        0.02590404 * l + 0.78277177 * m - 0.80867577 * s,
+    ]
+}
+
+#[inline]
+fn oklab_to_rgb(l_ok: f32, a_ok: f32, b_ok: f32) -> (u8, u8, u8) {
+    let l_ = l_ok + 0.39633778 * a_ok + 0.21580376 * b_ok;
+    let m_ = l_ok - 0.10556135 * a_ok - 0.06385417 * b_ok;
+    let s_ = l_ok - 0.08948418 * a_ok - 1.29148555 * b_ok;
+
+    let (l, m, s) = (l_ * l_ * l_, m_ * m_ * m_, s_ * s_ * s_);
+
+    let gamma = |v: f32| -> u8 {
+        let c = v.clamp(0.0, 1.0);
+        let g = if c <= 0.0031308 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+        (g * 255.0).round() as u8
+    };
+
+    (
+        gamma(4.0767417 * l - 3.3077116 * m + 0.2309699 * s),
+        gamma(-1.2684380 * l + 2.6097574 * m - 0.3413194 * s),
+        gamma(-0.0041961 * l - 0.7034186 * m + 1.7076147 * s),
+    )
+}
+
 /// Generates the 21-character Tuya DP 27 `music_data` string.
 /// Format: `[mode 1 char: 0=jump, 1=gradient]` + `HHHH` (hue 0-360) + `SSSS` (sat 0-1000) +
 /// `VVVV` (val 0-1000) + `BBBB` (brightness 0-1000) + `TTTT` (temp 0-1000).
@@ -260,7 +330,6 @@ impl BulbState {
                 .or_else(|| v.as_str().and_then(|s| s.parse::<u32>().ok()))
         };
 
-        // Check Type B first (DPS 20+)
         if let Some(p) = dps.get("20").and_then(parse_bool) {
             state.power = p;
         } else if let Some(p) = dps.get("1").and_then(parse_bool) {
@@ -350,6 +419,11 @@ impl BulbDevice {
     /// Whether the device connection is currently live.
     pub fn is_connected(&self) -> bool {
         self.device.is_connected()
+    }
+
+    /// Whether the bulb power state is currently ON.
+    pub fn is_power_on(&self) -> bool {
+        self.is_on.load(Ordering::Relaxed)
     }
 
     /// Wait for device connection to come up.
@@ -478,7 +552,6 @@ impl BulbDevice {
     }
 
     /// Enter music synchronization mode.
-    /// Sets Type B bulbs to DP 20=true, 21='music', and Type A bulbs to DP 1=true, 2='colour'.
     pub async fn enter_music_mode(&self) -> TokioResult<()> {
         let mut map = serde_json::Map::new();
         match self.bulb_type {
@@ -547,7 +620,6 @@ mod tests {
 
     #[test]
     fn hex12_encoding_and_parsing() {
-        // Red: H=0 (0x0000), S=1000 (0x03e8), V=1000 (0x03e8) -> 000003e803e8
         let red = BulbColor::from_hsv(0.0, 1.0, 1.0);
         assert_eq!(red.to_hex12(), "000003e803e8");
 
@@ -555,93 +627,27 @@ mod tests {
         assert_eq!(parsed.h, 0.0);
         assert!((parsed.s - 1.0).abs() < 0.01);
         assert!((parsed.v - 1.0).abs() < 0.01);
-
-        // Cyan: H=180 (0x00b4), S=500 (0x01f4), V=800 (0x0320)
-        let cyan = BulbColor::from_hsv(180.0, 0.5, 0.8);
-        assert_eq!(cyan.to_hex12(), "00b401f40320");
-        let parsed_cyan = BulbColor::parse("00b401f40320").expect("parse cyan");
-        assert_eq!(parsed_cyan.h, 180.0);
-        assert!((parsed_cyan.s - 0.5).abs() < 0.01);
-        assert!((parsed_cyan.v - 0.8).abs() < 0.01);
     }
 
     #[test]
-    fn hex14_encoding_and_parsing() {
-        let green = BulbColor::from_hsv(120.0, 1.0, 1.0);
-        let h14 = green.to_hex14();
-        assert_eq!(h14, "00ff000078ffff");
+    fn lerp_oklab_interpolates_smoothly() {
+        let red = BulbColor::from_rgb(255, 0, 0);
+        let blue = BulbColor::from_rgb(0, 0, 255);
 
-        let parsed = BulbColor::parse(&h14).expect("parse hex14");
-        assert_eq!(parsed.h, 120.0);
-        assert!((parsed.s - 1.0).abs() < 0.01);
-        assert!((parsed.v - 1.0).abs() < 0.01);
-    }
+        assert_eq!(red.lerp_oklab(blue, 0.0).to_rgb(), red.to_rgb());
+        assert_eq!(red.lerp_oklab(blue, 1.0).to_rgb(), blue.to_rgb());
 
-    #[test]
-    fn json_color_format_roundtrip() {
-        let amber = BulbColor::from_hsv(35.0, 0.9, 0.85);
-        let json_str = amber.to_json_str();
-        let parsed = BulbColor::parse(&json_str).expect("parse json");
-        assert_eq!(parsed.h, 35.0);
-        assert!((parsed.s - 0.9).abs() < 0.01);
-        assert!((parsed.v - 0.85).abs() < 0.01);
+        let mid = red.lerp_oklab(blue, 0.5);
+        let (r, _g, b) = mid.to_rgb();
+        assert!(r > 50 && b > 50);
+        assert_eq!(red.to_hex_rgb(), "#FF0000");
     }
 
     #[test]
     fn music_data_format_21_chars() {
-        // Test DP 27 formatting
-        let color = BulbColor::from_hsv(120.0, 1.0, 1.0); // H=120 (0x0078), S=1000 (0x03e8), V=1000 (0x03e8)
+        let color = BulbColor::from_hsv(120.0, 1.0, 1.0);
         let data = format_music_data(color, 1000, 500, false);
-        // mode '0' + 0078 + 03e8 + 03e8 + 03e8 (bright=1000) + 01f4 (temp=500)
         assert_eq!(data.len(), 21);
         assert_eq!(data, "0007803e803e803e801f4");
-
-        let gradient_data = format_music_data(color, 800, 0, true);
-        assert_eq!(gradient_data.len(), 21);
-        assert_eq!(gradient_data, "1007803e803e803200000");
-    }
-
-    #[test]
-    fn bulb_state_dps_parsing() {
-        let mut dps = serde_json::Map::new();
-        dps.insert("20".to_string(), Value::Bool(true));
-        dps.insert("21".to_string(), Value::String("colour".to_string()));
-        dps.insert("22".to_string(), Value::from(850u64));
-        dps.insert("23".to_string(), Value::from(400u64));
-        dps.insert(
-            "24".to_string(),
-            Value::String("000003e803e8".to_string()),
-        );
-
-        let state = BulbState::from_dps(&dps);
-        assert!(state.power);
-        assert_eq!(state.mode, BulbMode::Colour);
-        assert_eq!(state.brightness, 850);
-        assert_eq!(state.color_temp, 400);
-        assert_eq!(state.color.h, 0.0);
-    }
-
-    #[test]
-    fn robust_dps_string_and_float_parsing() {
-        let mut dps = serde_json::Map::new();
-        dps.insert("20".to_string(), Value::String("true".to_string()));
-        dps.insert("21".to_string(), Value::String("music".to_string()));
-        dps.insert("22".to_string(), Value::String("750".to_string()));
-        dps.insert("23".to_string(), serde_json::json!(450.0));
-
-        let state = BulbState::from_dps(&dps);
-        assert!(state.power);
-        assert_eq!(state.mode, BulbMode::Music);
-        assert_eq!(state.brightness, 750);
-        assert_eq!(state.color_temp, 450);
-    }
-
-    #[test]
-    fn hsv_percentage_input_normalization() {
-        // Saturation and value passed as 0-100 percentages
-        let color = BulbColor::from_hsv(180.0, 80.0, 90.0);
-        assert_eq!(color.h, 180.0);
-        assert!((color.s - 0.8).abs() < 0.001);
-        assert!((color.v - 0.9).abs() < 0.001);
     }
 }

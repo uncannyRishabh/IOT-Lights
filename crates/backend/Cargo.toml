@@ -7,7 +7,7 @@ license.workspace = true
 description = "Backend server and CLI for Tuya smart bulbs beat-sync lighting controller"
 
 [[bin]]
-name = "iot-lights"
+name = "iot-bulb-sync"
 path = "src/main.rs"
 
 [dependencies]

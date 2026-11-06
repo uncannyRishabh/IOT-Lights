@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -e
 
-# IOT-Lights Server & Dashboard Startup Script
+# IOT-Bulb Sync Server & Dashboard Startup Script
 PORT="${1:-${PORT:-8080}}"
 
 echo "=========================================================="
-echo "          IOT-Lights | Audio Beat-Sync Lighting           "
+echo "         IOT-Bulb Sync | Audio Beat & IMAX Screen Sync    "
 echo "=========================================================="
 
 # 1. Dependency checks
@@ -45,7 +45,7 @@ echo " Local URL    : http://localhost:${PORT}"
 echo " Mobile / LAN : http://${LAN_IP}:${PORT}"
 echo " WebSocket    : ws://${LAN_IP}:${PORT}/ws"
 echo "=========================================================="
-echo "[*] Building and starting IOT-Lights service..."
+echo "[*] Building and starting IOT-Bulb Sync service..."
 echo ""
 
-exec cargo run --bin iot-lights -- serve --port "${PORT}"
+exec cargo run --bin iot-bulb-sync -- serve --port "${PORT}"

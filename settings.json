@@ -1,0 +1,37 @@
+{
+  "engine_mode": "BeatSync",
+  "palette": "Cyberpunk",
+  "custom_palette": [
+    {
+      "h": 349.72375,
+      "s": 0.7418033,
+      "v": 0.95686275
+    },
+    {
+      "h": 238.73239,
+      "s": 0.5892116,
+      "v": 0.94509804
+    },
+    {
+      "h": 160.11835,
+      "s": 0.91351354,
+      "v": 0.7254902
+    }
+  ],
+  "ambience_mode": "DarkMode",
+  "master_brightness": 0.25,
+  "transition_mode": "Auto",
+  "invert_auto_gradual": false,
+  "transition_speed": 0.5,
+  "color_frequency": 0.89,
+  "auto_normalize": true,
+  "noise_gate_db": -45.0,
+  "sensitivity": 1.01,
+  "focus_mode": "FullMix",
+  "audio_device": "MacBook Air Microphone",
+  "imax_display": 0,
+  "imax_fps": 20,
+  "imax_smoothing": 0.82,
+  "imax_saturation_boost": 1.35,
+  "imax_color_mode": "Prominent"
+}

@@ -1,10 +1,11 @@
-//! Audio Ingestion using `cpal` CoreAudio stream and lock-free ring buffer.
+//! Audio Ingestion using `cpal` CoreAudio stream and lock-free ring buffer with Mid/Side stereo separation.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::HeapRb;
+use crate::dsp::AudioFocusMode;
 
 /// Audio input device information.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -13,13 +14,15 @@ pub struct AudioDeviceInfo {
     pub is_default: bool,
 }
 
-/// Active audio input stream capturing samples into a ring buffer.
+/// Active audio input stream capturing samples into dual lock-free ring buffers (Mid and Side).
 /// Runs CoreAudio on a dedicated OS thread, keeping the handle Send-safe for Tokio.
 pub struct AudioStream {
-    consumer: ringbuf::HeapCons<f32>,
+    cons_mid: ringbuf::HeapCons<f32>,
+    cons_side: ringbuf::HeapCons<f32>,
     _stop_tx: std::sync::mpsc::Sender<()>,
     is_running: Arc<AtomicBool>,
     sample_rate: u32,
+    channels: u16,
 }
 
 impl AudioStream {
@@ -42,14 +45,17 @@ impl AudioStream {
 
     /// Open an audio input stream from the default or named device.
     pub fn new(device_name: Option<&str>, _preferred_sample_rate: u32, buffer_capacity: usize) -> anyhow::Result<Self> {
-        let ring_buffer = HeapRb::<f32>::new(buffer_capacity);
-        let (mut prod, cons) = ring_buffer.split();
+        let rb_mid = HeapRb::<f32>::new(buffer_capacity);
+        let (mut prod_mid, cons_mid) = rb_mid.split();
+
+        let rb_side = HeapRb::<f32>::new(buffer_capacity);
+        let (mut prod_side, cons_side) = rb_side.split();
 
         let is_running = Arc::new(AtomicBool::new(true));
         let running_clone = Arc::clone(&is_running);
 
         let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
-        let (init_tx, init_rx) = std::sync::mpsc::channel::<anyhow::Result<u32>>();
+        let (init_tx, init_rx) = std::sync::mpsc::channel::<anyhow::Result<(u32, u16)>>();
 
         let dev_name = device_name.map(str::to_string);
 
@@ -95,12 +101,17 @@ impl AudioStream {
                                 let ch = channels as usize;
                                 if ch == 1 {
                                     for &sample in data {
-                                        let _ = prod.try_push(sample);
+                                        let _ = prod_mid.try_push(sample);
+                                        let _ = prod_side.try_push(0.0);
                                     }
                                 } else {
                                     for chunk in data.chunks_exact(ch) {
-                                        let sum: f32 = chunk.iter().sum();
-                                        let _ = prod.try_push(sum / (ch as f32));
+                                        let left = chunk[0];
+                                        let right = chunk[1];
+                                        let mid = (left + right) * 0.5;
+                                        let side = (left - right) * 0.5;
+                                        let _ = prod_mid.try_push(mid);
+                                        let _ = prod_side.try_push(side);
                                     }
                                 }
                             }
@@ -117,12 +128,18 @@ impl AudioStream {
                                 let ch = channels as usize;
                                 if ch == 1 {
                                     for &s in data {
-                                        let _ = prod.try_push(s as f32 / 32768.0);
+                                        let sample = s as f32 / 32768.0;
+                                        let _ = prod_mid.try_push(sample);
+                                        let _ = prod_side.try_push(0.0);
                                     }
                                 } else {
                                     for chunk in data.chunks_exact(ch) {
-                                        let sum: f32 = chunk.iter().map(|&s| s as f32 / 32768.0).sum();
-                                        let _ = prod.try_push(sum / (ch as f32));
+                                        let left = chunk[0] as f32 / 32768.0;
+                                        let right = chunk[1] as f32 / 32768.0;
+                                        let mid = (left + right) * 0.5;
+                                        let side = (left - right) * 0.5;
+                                        let _ = prod_mid.try_push(mid);
+                                        let _ = prod_side.try_push(side);
                                     }
                                 }
                             }
@@ -139,12 +156,18 @@ impl AudioStream {
                                 let ch = channels as usize;
                                 if ch == 1 {
                                     for &s in data {
-                                        let _ = prod.try_push((s as f32 - 32768.0) / 32768.0);
+                                        let sample = (s as f32 - 32768.0) / 32768.0;
+                                        let _ = prod_mid.try_push(sample);
+                                        let _ = prod_side.try_push(0.0);
                                     }
                                 } else {
                                     for chunk in data.chunks_exact(ch) {
-                                        let sum: f32 = chunk.iter().map(|&s| (s as f32 - 32768.0) / 32768.0).sum();
-                                        let _ = prod.try_push(sum / (ch as f32));
+                                        let left = (chunk[0] as f32 - 32768.0) / 32768.0;
+                                        let right = (chunk[1] as f32 - 32768.0) / 32768.0;
+                                        let mid = (left + right) * 0.5;
+                                        let side = (left - right) * 0.5;
+                                        let _ = prod_mid.try_push(mid);
+                                        let _ = prod_side.try_push(side);
                                     }
                                 }
                             }
@@ -172,27 +195,30 @@ impl AudioStream {
                 return;
             }
 
-            let _ = init_tx.send(Ok(actual_sample_rate));
+            let _ = init_tx.send(Ok((actual_sample_rate, channels)));
 
             // Keep stream alive until stop signal received on drop
             let _ = stop_rx.recv();
         });
 
-        let detected_sample_rate = init_rx.recv()??;
+        let (detected_sample_rate, detected_channels) = init_rx.recv()??;
 
         Ok(Self {
-            consumer: cons,
+            cons_mid,
+            cons_side,
             _stop_tx: stop_tx,
             is_running,
             sample_rate: detected_sample_rate,
+            channels: detected_channels,
         })
     }
 
-    /// Read available samples from the ring buffer into a vector.
+    /// Read available Mid samples from the ring buffer into a vector (draining Side to stay aligned).
     pub fn read_samples(&mut self, max_samples: usize) -> Vec<f32> {
         let mut samples = Vec::with_capacity(max_samples);
         while samples.len() < max_samples {
-            if let Some(sample) = self.consumer.try_pop() {
+            if let Some(sample) = self.cons_mid.try_pop() {
+                let _ = self.cons_side.try_pop();
                 samples.push(sample);
             } else {
                 break;
@@ -201,9 +227,60 @@ impl AudioStream {
         samples
     }
 
+    /// Read samples tailored to the active AudioFocusMode:
+    /// - FullMix: Mid channel (L + R) / 2
+    /// - VocalsOnly: Mid channel (L + R) / 2 (center lead vocal isolation)
+    /// - InstrumentsOnly: Side channel (L - R) / 2 (vocal cancellation when stereo), or Mid when mono
+    pub fn read_samples_focused(&mut self, max_samples: usize, focus_mode: AudioFocusMode) -> Vec<f32> {
+        let mut samples = Vec::with_capacity(max_samples);
+        let has_stereo = self.channels >= 2;
+
+        while samples.len() < max_samples {
+            match (self.cons_mid.try_pop(), self.cons_side.try_pop()) {
+                (Some(m), Some(s)) => {
+                    let s_val = match focus_mode {
+                        AudioFocusMode::FullMix | AudioFocusMode::VocalsOnly => m,
+                        AudioFocusMode::InstrumentsOnly => {
+                            if has_stereo {
+                                // Side channel cancels center vocals; boost slightly to match mid RMS
+                                s * 1.35
+                            } else {
+                                m
+                            }
+                        }
+                    };
+                    samples.push(s_val);
+                }
+                _ => break,
+            }
+        }
+        samples
+    }
+
+    /// Read both Mid and Side channels simultaneously for advanced multi-band stem routing.
+    pub fn read_mid_side(&mut self, max_samples: usize) -> (Vec<f32>, Vec<f32>) {
+        let mut mid = Vec::with_capacity(max_samples);
+        let mut side = Vec::with_capacity(max_samples);
+        while mid.len() < max_samples {
+            match (self.cons_mid.try_pop(), self.cons_side.try_pop()) {
+                (Some(m), Some(s)) => {
+                    mid.push(m);
+                    side.push(s);
+                }
+                _ => break,
+            }
+        }
+        (mid, side)
+    }
+
     /// Sample rate of the stream.
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
+    }
+
+    /// Number of channels in the input stream.
+    pub fn channels(&self) -> u16 {
+        self.channels
     }
 
     /// Pause audio ingestion.

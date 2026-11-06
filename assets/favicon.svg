@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="gearGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="55%" stop-color="#D97706"/>
+      <stop offset="100%" stop-color="#94A3B8"/>
+    </linearGradient>
+    <linearGradient id="domeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F0FF"/>
+      <stop offset="55%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#F43F5E"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#090A0D" stroke="#222631" stroke-width="2"/>
+  <!-- Outer Settings Gear Ring -->
+  <path d="M30 6 L34 6 L35 11 L39 12.5 L43 9.5 L46 12.5 L43 16.5 L44.5 20.5 L49.5 21.5 L49.5 25.5 L44.5 26.5 L43 30.5 L46 34.5 L43 37.5 L39 34.5 L35 36 L34 41 L30 41 L29 36 L25 34.5 L21 37.5 L18 34.5 L21 30.5 L19.5 26.5 L14.5 25.5 L14.5 21.5 L19.5 20.5 L21 16.5 L18 12.5 L21 9.5 L25 12.5 L29 11 Z"
+        transform="translate(0, 4)" fill="none" stroke="url(#gearGrad)" stroke-width="2.4" stroke-linejoin="round" opacity="0.9"/>
+  <!-- Smart Bulb Glass Dome Inside Gear -->
+  <path d="M23 38 C18 33 18 22 25 17 C29 13.5 35 13.5 39 17 C46 22 46 33 41 38 C38.5 40.5 37.5 43 37.5 46 L26.5 46 C26.5 43 25.5 40.5 23 38 Z"
+        fill="url(#domeGrad)" fill-opacity="0.24" stroke="url(#domeGrad)" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- Inner Filament / Precision Node -->
+  <circle cx="32" cy="27" r="4.5" fill="none" stroke="#F8FAFC" stroke-width="2"/>
+  <line x1="29" y1="30.5" x2="29" y2="45" stroke="#F59E0B" stroke-width="2" stroke-linecap="round"/>
+  <line x1="35" y1="30.5" x2="35" y2="45" stroke="#F59E0B" stroke-width="2" stroke-linecap="round"/>
+  <!-- Screw Base -->
+  <line x1="27" y1="50" x2="37" y2="50" stroke="#CBD5E1" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="29" y1="54" x2="35" y2="54" stroke="#94A3B8" stroke-width="2.6" stroke-linecap="round"/>
+</svg>
