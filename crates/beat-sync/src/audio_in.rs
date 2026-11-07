@@ -26,20 +26,55 @@ pub struct AudioStream {
 }
 
 impl AudioStream {
-    /// List available input devices on macOS (Microphone, BlackHole, etc.).
+    /// List available input devices on macOS, Linux, and Windows.
     pub fn list_input_devices() -> Vec<AudioDeviceInfo> {
         let host = cpal::default_host();
         let default_name = host.default_input_device().and_then(|d| d.name().ok());
 
         let mut devices = Vec::new();
-        if let Ok(input_devices) = host.input_devices() {
-            for dev in input_devices {
-                if let Ok(name) = dev.name() {
-                    let is_default = default_name.as_deref() == Some(&name);
-                    devices.push(AudioDeviceInfo { name, is_default });
+
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(outputs) = host.output_devices() {
+                for dev in outputs {
+                    if let Ok(name) = dev.name() {
+                        devices.push(AudioDeviceInfo {
+                            name: format!("[Loopback] {}", name),
+                            is_default: false,
+                        });
+                    }
                 }
             }
         }
+
+        if let Ok(input_devices) = host.input_devices() {
+            for dev in input_devices {
+                if let Ok(name) = dev.name() {
+                    #[cfg(target_os = "linux")]
+                    let is_monitor = name.contains(".monitor") || name.to_lowercase().contains("monitor of");
+                    #[cfg(target_os = "linux")]
+                    let display_name = if is_monitor {
+                        format!("{} (System Audio Loopback)", name)
+                    } else {
+                        name.clone()
+                    };
+                    #[cfg(not(target_os = "linux"))]
+                    let display_name = name.clone();
+
+                    let is_default = default_name.as_deref() == Some(&name);
+                    devices.push(AudioDeviceInfo {
+                        name: display_name,
+                        is_default,
+                    });
+                }
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            devices.sort_by_key(|d| !d.name.contains("(System Audio Loopback)"));
+        }
+
         devices
     }
 
@@ -61,9 +96,32 @@ impl AudioStream {
 
         std::thread::spawn(move || {
             let host = cpal::default_host();
-            let device = if let Some(ref name) = dev_name {
+
+            #[cfg(target_os = "windows")]
+            let is_loopback = dev_name.as_deref().map(|n| n.starts_with("[Loopback] ")).unwrap_or(false);
+            #[cfg(not(target_os = "windows"))]
+            let is_loopback = false;
+
+            let device = if is_loopback {
+                #[cfg(target_os = "windows")]
+                {
+                    let raw_name = dev_name.as_deref().unwrap().trim_start_matches("[Loopback] ");
+                    host.output_devices().ok().and_then(|mut devs| {
+                        devs.find(|d| d.name().map(|n| n == raw_name).unwrap_or(false))
+                    })
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    None
+                }
+            } else if let Some(ref name) = dev_name {
+                #[cfg(target_os = "linux")]
+                let clean_name = name.trim_end_matches(" (System Audio Loopback)");
+                #[cfg(not(target_os = "linux"))]
+                let clean_name = name.as_str();
+
                 match host.input_devices() {
-                    Ok(mut devs) => devs.find(|d| d.name().map(|n| &n == name).unwrap_or(false)),
+                    Ok(mut devs) => devs.find(|d| d.name().map(|n| n == clean_name).unwrap_or(false)),
                     Err(e) => {
                         let _ = init_tx.send(Err(e.into()));
                         return;
@@ -78,11 +136,21 @@ impl AudioStream {
                 return;
             };
 
-            let default_config = match device.default_input_config() {
-                Ok(c) => c,
-                Err(e) => {
-                    let _ = init_tx.send(Err(e.into()));
-                    return;
+            let default_config = if is_loopback {
+                match device.default_output_config() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let _ = init_tx.send(Err(e.into()));
+                        return;
+                    }
+                }
+            } else {
+                match device.default_input_config() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let _ = init_tx.send(Err(e.into()));
+                        return;
+                    }
                 }
             };
 

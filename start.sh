@@ -2,10 +2,34 @@
 set -e
 
 # IOT-Bulb Sync Server & Dashboard Startup Script
-PORT="${1:-${PORT:-8080}}"
+PORT="${PORT:-8080}"
+MODE="serve"
+
+for arg in "$@"; do
+    case "$arg" in
+        --tui|-t|tui)
+            MODE="tui"
+            ;;
+        --help|-h)
+            echo "Usage: ./start.sh [PORT] [--tui]"
+            echo ""
+            echo "Options:"
+            echo "  PORT      HTTP port for the web dashboard (default: 8080)"
+            echo "  --tui     Launch interactive Truecolor terminal visualizer & controller"
+            exit 0
+            ;;
+        [0-9]*)
+            PORT="$arg"
+            ;;
+    esac
+done
+
+if [ "$TUI" = "1" ]; then
+    MODE="tui"
+fi
 
 echo "=========================================================="
-echo "         IOT-Bulb Sync | Audio Beat & IMAX Screen Sync    "
+echo "         IOT-Bulb Sync v3.0 | Audio Beat & IMAX Sync      "
 echo "=========================================================="
 
 # 1. Dependency checks
@@ -18,6 +42,16 @@ fi
 echo "[*] Checking Rust toolchain..."
 rustc --version
 cargo --version
+
+if [ "$MODE" = "tui" ]; then
+    echo "=========================================================="
+    echo " Mode: Interactive 24-bit Truecolor Terminal Visualizer"
+    echo " Hotkeys: [M] Mode  [D] Display  [P] Pair/Scan LAN  [S] Save bulbs.json  [Space] Power  [Q/Esc] Quit"
+    echo "=========================================================="
+    echo "[*] Launching IOT-Bulb Sync TUI..."
+    echo ""
+    exec cargo run --bin iot-bulb-sync -- tui
+fi
 
 # 2. Determine LAN IP address for mobile access
 LAN_IP=""

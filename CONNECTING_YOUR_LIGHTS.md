@@ -77,15 +77,31 @@ Your bulb must be on the **same local network / Wi-Fi subnet** (2.4 GHz) as your
 
 ### Option 1: Built-in Network Scanner in IOT-Lights Dashboard
 1. Launch the server via `./start.sh` and open `http://localhost:8080`.
-2. In the **Bulb Fleet** section, click **Scan Network**.
-3. Any Tuya devices broadcasting on UDP 6666/6667 will appear under "DISCOVERED ON NETWORK".
-4. Click **Use This** to automatically fill in the Device ID and IP address!
+2. In the **Bulb Fleet Rail** section, click **Scan LAN**.
+3. Any Tuya devices broadcasting on UDP 6666/6667 will appear under discovered devices.
+4. Each discovered device card contains:
+   - **Fill Form**: Pre-populates the manual device modal.
+   - **Inline Local Key Field & "+ Pair & Save to JSON"**: Enter your 16-character local key directly and pair the bulb with a single click, automatically writing it permanently to `bulbs.json`!
+5. You can also click **Save to bulbs.json** anytime in the Fleet Rail card header to permanently persist active fleet changes.
 
-### Option 2: Command-Line Scanner
+### Option 2: Command-Line Scanner & Interactive TUI
 Run the standalone scanner tool:
 ```bash
 cargo run --bin iot-bulb-sync -- scan --seconds 5
 ```
+Or launch the 24-bit Truecolor terminal controller:
+```bash
+cargo run --bin iot-bulb-sync -- tui
+# or
+./start.sh --tui
+```
+Inside the TUI:
+- Press `[M]` to hot-swap between Beat Sync and IMAX Mode in-place without restarting.
+- Press `[D]` to cycle target display (when multiple monitors are available in IMAX mode).
+- Press `[P]` to trigger live UDP 6666/6667 LAN discovery, list responsive bulbs, and pair them with 1–9.
+- Press `[S]` to atomically save the active fleet configuration permanently to `bulbs.json`.
+- Press `[Space]` to toggle fleet power ON/OFF.
+- Press `[Q]` or `[Esc]` to quit cleanly and restore terminal raw mode.
 
 ### Option 3: Router DHCP Table
 Log into your Wi-Fi router's admin portal (usually `192.168.1.1` or `192.168.0.1`), locate the DHCP Client List, and assign a **DHCP Reservation** (static IP) to each bulb's MAC address so its IP address never changes when your router reboots.
@@ -96,12 +112,18 @@ Log into your Wi-Fi router's admin portal (usually `192.168.1.1` or `192.168.0.1
 
 ### Via the Web Dashboard
 1. Open `http://localhost:8080` (or `http://<your-lan-ip>:8080` on mobile).
-2. All devices in `devices.json` are automatically loaded and connected on startup.
-3. To add a new bulb, open **Connect New Bulb**, enter your **Device ID**, **Local Key**, and **Local IP**, and click **Add to Fleet** (it will automatically persist to `devices.json`).
-4. Use the single **Power ON/OFF Toggle Switch** or open the **Full 360° Color & White Wheel** on any bulb card.
+2. All devices in `bulbs.json` are automatically loaded and connected on startup.
+3. To add a new bulb, open **Connect New Bulb**, enter your **Device ID**, **Local Key**, and **Local IP**, and click **Add to Fleet**.
+4. Click **Save to bulbs.json** in the card header to write changes permanently.
+5. Use the single **Power ON/OFF Toggle Switch** or open the **Full 360° Color & White Wheel** on any bulb card.
 
 ### Via the CLI
-To run IMAX Prominent-Color Screen Sync across your fleet (prompts for display if multiple monitors are detected):
+To launch the interactive Truecolor terminal visualizer & controller:
+```bash
+cargo run --release --bin iot-bulb-sync -- tui
+```
+
+To run IMAX Prominent-Color Screen Sync across your fleet:
 ```bash
 cargo run --release --bin iot-bulb-sync -- imax --fps 20 --color-mode prominent
 ```
@@ -135,35 +157,32 @@ cargo run --release --bin iot-bulb-sync -- control \
 
 ---
 
-## 5. macOS Audio Setup (Clean Internal Audio Sync)
+## 5. Audio Setup (Clean Internal Audio Loopback)
 
-IOT-Lights analyzes audio transients (kick drums, snare snaps, and bass drop dynamics) in real time.
+IOT-Lights analyzes audio transients (kick drums, snare snaps, vocal pitch formants, and bass drop dynamics) in real time.
 
 ### Option A: Default Built-In Microphone
-- Works out of the box with zero additional configuration.
+- Works out of the box with zero additional configuration on macOS, Linux, and Windows.
 - Best for listening to music playing in your room from external speakers.
-- In the dashboard, select **Built-in Microphone (Default)**.
+- In the dashboard or TUI, select your default microphone.
 
-### Option B: BlackHole Virtual Audio Driver (Studio Quality, Zero Room Echo)
-If you are playing music directly on your Mac (Spotify, Apple Music, YouTube, DJ software) and want pure, noise-free beat synchronization:
-
-1. **Install BlackHole 2-Channel Virtual Loopback**:
+### Option B: macOS Digital Audio Loopback (BlackHole)
+1. Install BlackHole 2-Channel Virtual Loopback:
    ```bash
    brew install blackhole-2ch
    ```
-2. **Create a Multi-Output Device** (so you can hear the music while sending it to IOT-Lights):
-   - Open macOS **Audio MIDI Setup** (press `Cmd + Space`, search `Audio MIDI Setup`).
-   - Click the **`+`** icon in the bottom-left corner -> select **Create Multi-Output Device**.
-   - Check both:
-     - [x] **Your Speakers / Headphones** (e.g. MacBook Pro Speakers, External Headphones)
-     - [x] **BlackHole 2ch**
-   - Ensure your physical speakers are set as the *Master Device* and *Drift Correction* is checked for BlackHole.
-3. **Set System Output**:
-   - In macOS System Settings -> **Sound** -> **Output**, select **Multi-Output Device**.
-4. **Configure IOT-Lights**:
-   - In the IOT-Lights Web Dashboard, select **BlackHole 2ch** from the **Audio Capture Input** dropdown.
-   - Click **Start Beat Sync**.
-   - Your smart lights will now pulse and color-shift to the pure digital audio stream with zero room echo or microphone feedback!
+2. Open **Audio MIDI Setup** (`Cmd + Space` -> `Audio MIDI Setup`).
+3. Click `+` -> **Create Multi-Output Device** -> check both your physical Speakers/Headphones and **BlackHole 2ch**.
+4. Set macOS output to the Multi-Output Device.
+5. In IOT-Lights, select **BlackHole 2ch** from the audio dropdown.
+
+### Option C: Linux PipeWire / PulseAudio Digital Loopback
+- IOT-Lights natively queries ALSA and PulseAudio/PipeWire `.monitor` capture streams.
+- Simply select the `.monitor` device corresponding to your default audio sink (e.g., `alsa_output.pci-...monitor`).
+
+### Option D: Windows WASAPI Digital Loopback
+- IOT-Lights automatically scans and exposes all active Windows WASAPI render endpoints as `[Loopback] <Device Name>`.
+- Select your active speaker or headphone loopback device to sync directly from internal audio with zero microphone latency!
 
 ---
 

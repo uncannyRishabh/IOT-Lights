@@ -1,6 +1,7 @@
 //! IOT-Bulb Sync: Backend server, CLI, and IMAX Prominent Color Screen Sync controller for Tuya smart bulbs.
 
 pub mod local_identity;
+pub mod tui;
 
 use std::io::{self, Write};
 use std::net::SocketAddr;
@@ -26,8 +27,8 @@ use beat_sync::{
     ImaxConfig, ImaxEngine, TransitionMode,
 };
 use local_identity::{
-    infer_friendly_bulb_name, load_devices_json, lookup_arp_mac, save_devices_json,
-    SavedDeviceRecord,
+    infer_friendly_bulb_name, load_devices_json, lookup_arp_mac, resolve_fleet_config_path,
+    save_devices_json, SavedDeviceRecord,
 };
 use rustuya_tokio::{Discovery, Version};
 use tuya_bulb::{BulbColor, BulbType, ColorFormat};
@@ -46,6 +47,17 @@ struct Cli {
 enum Commands {
     /// Start the REST & WebSocket backend server with Web Dashboard
     Serve {
+        #[arg(short, long, default_value = "8080")]
+        port: u16,
+        /// Launch the 24-bit Truecolor terminal visualizer & controller
+        #[arg(long)]
+        tui: bool,
+        /// Suppress interactive TUI and run headless server logs only
+        #[arg(long)]
+        no_tui: bool,
+    },
+    /// Interactive 24-bit Truecolor ANSI terminal visualizer & controller
+    Tui {
         #[arg(short, long, default_value = "8080")]
         port: u16,
     },
@@ -95,6 +107,9 @@ enum Commands {
         ip: Option<String>,
         #[arg(long, default_value = "3.5")]
         version: String,
+        /// Launch the 24-bit Truecolor terminal visualizer & controller
+        #[arg(long)]
+        tui: bool,
     },
     /// Directly control a bulb (turn on/off, color, white)
     Control {
@@ -249,6 +264,18 @@ pub struct WsTelemetry {
     pub active_brightness: u32,
     pub active_rgb: (u8, u8, u8),
     pub agc_gain: f32,
+    #[serde(default = "default_effective_freq")]
+    pub effective_color_frequency: f32,
+    #[serde(default = "default_effective_interval")]
+    pub effective_color_interval_ms: u32,
+}
+
+fn default_effective_freq() -> f32 {
+    0.70
+}
+
+fn default_effective_interval() -> u32 {
+    160
 }
 
 /// Runtime state written by CLI `iot-bulb-sync imax` so Web UI knows when CLI IMAX is active.
@@ -308,8 +335,19 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    match cli.command.unwrap_or(Commands::Serve { port: 8080 }) {
-        Commands::Serve { port } => run_server(port).await?,
+    match cli.command.unwrap_or(Commands::Serve {
+        port: 8080,
+        tui: false,
+        no_tui: false,
+    }) {
+        Commands::Serve { port, tui, no_tui } => {
+            if tui && !no_tui {
+                run_tui_mode(port).await?;
+            } else {
+                run_server(port).await?;
+            }
+        }
+        Commands::Tui { port } => run_tui_mode(port).await?,
         Commands::Scan { seconds } => run_scan(seconds).await?,
         Commands::Sync {
             id,
@@ -331,21 +369,26 @@ async fn main() -> anyhow::Result<()> {
             key,
             ip,
             version,
+            tui,
         } => {
-            run_cli_imax(
-                fps,
-                display,
-                smoothing,
-                saturation_boost,
-                min_brightness,
-                max_brightness,
-                color_mode,
-                id,
-                key,
-                ip,
-                version,
-            )
-            .await?
+            if tui {
+                run_tui_mode(8080).await?;
+            } else {
+                run_cli_imax(
+                    fps,
+                    display,
+                    smoothing,
+                    saturation_boost,
+                    min_brightness,
+                    max_brightness,
+                    color_mode,
+                    id,
+                    key,
+                    ip,
+                    version,
+                )
+                .await?
+            }
         }
         Commands::Control {
             id,
@@ -368,7 +411,7 @@ async fn run_scan(seconds: u64) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to bind discovery socket: {:?}", e))?;
 
     let devices = disco.scan(Duration::from_secs(seconds)).await;
-    let saved = load_devices_json(Path::new("devices.json"));
+    let saved = load_devices_json(&resolve_fleet_config_path());
 
     println!(
         "\n{:<24} {:<16} {:<18} {:<8} {:<24}",
@@ -614,8 +657,9 @@ async fn run_cli_imax(
             .await?;
         bulbs_count += 1;
     } else {
-        println!("Loading fleet from devices.json...");
-        let saved = load_devices_json(Path::new("devices.json"));
+        let config_path = resolve_fleet_config_path();
+        println!("Loading fleet from {}...", config_path.display());
+        let saved = load_devices_json(&config_path);
         for rec in saved {
             println!(
                 "  -> Adding bulb: {} ({})",
@@ -684,55 +728,42 @@ async fn run_cli_imax(
         let frame_interval =
             Duration::from_millis((1000 / engine.cfg.target_fps.max(1) as u64).max(10));
 
-        #[cfg(target_os = "macos")]
+        if let Some((color, brightness, is_cut)) =
+            beat_sync::imax::macos_capture::capture_screen_frame(current_display, &mut engine)
         {
-            if let Some((color, brightness, is_cut)) =
-                beat_sync::imax::macos_capture::capture_screen_frame(current_display, &mut engine)
-            {
-                let (r, g, b) = color.to_rgb();
-                let tag = if is_cut { "[IMAX CUT ]" } else { "[IMAX SYNC]" };
-                print!(
-                    "\r\x1b[K{tag} Display #{} | RGB: ({:>3}, {:>3}, {:>3}) | Brightness: {:>4} | Hue: {:>5.1}°",
-                    current_display, r, g, b, brightness, color.h
-                );
-                let _ = io::stdout().flush();
+            let (r, g, b) = color.to_rgb();
+            let tag = if is_cut { "[IMAX CUT ]" } else { "[IMAX SYNC]" };
+            print!(
+                "\r\x1b[K{tag} Display #{} | RGB: ({:>3}, {:>3}, {:>3}) | Brightness: {:>4} | Hue: {:>5.1}°",
+                current_display, r, g, b, brightness, color.h
+            );
+            let _ = io::stdout().flush();
 
-                // Broadcast with instant jump (!is_cut -> gradient=false on cuts for minimal transition time!)
-                fleet
-                    .broadcast_music_frame(color, brightness, 500, !is_cut)
-                    .await;
-
-                // Publish live CLI state for Web UI detection
-                let now_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
-                let rt = ImaxCliRuntimeState {
-                    active: true,
-                    pid: std::process::id(),
-                    timestamp_ms: now_ms,
-                    display: current_display,
-                    fps: engine.cfg.target_fps,
-                    smoothing: engine.cfg.smoothing,
-                    saturation_boost: engine.cfg.saturation_boost,
-                    color_mode: engine.cfg.color_mode,
-                    active_rgb: (r, g, b),
-                    active_brightness: brightness,
-                };
-                if let Ok(json) = serde_json::to_string(&rt) {
-                    let _ = std::fs::write(runtime_path, json);
-                }
-            }
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            let mock_buf = vec![180u8; 64 * 36 * 4];
-            let (color, brightness, is_cut) =
-                engine.process_rgba_with_cut_flag(&mock_buf, 64, 36, 64 * 4, false);
+            // Broadcast with instant jump (!is_cut -> gradient=false on cuts for minimal transition time!)
             fleet
                 .broadcast_music_frame(color, brightness, 500, !is_cut)
                 .await;
+
+            // Publish live CLI state for Web UI detection
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let rt = ImaxCliRuntimeState {
+                active: true,
+                pid: std::process::id(),
+                timestamp_ms: now_ms,
+                display: current_display,
+                fps: engine.cfg.target_fps,
+                smoothing: engine.cfg.smoothing,
+                saturation_boost: engine.cfg.saturation_boost,
+                color_mode: engine.cfg.color_mode,
+                active_rgb: (r, g, b),
+                active_brightness: brightness,
+            };
+            if let Ok(json) = serde_json::to_string(&rt) {
+                let _ = std::fs::write(runtime_path, json);
+            }
         }
 
         let elapsed = loop_start.elapsed();
@@ -757,9 +788,37 @@ fn check_external_imax_cli() -> Option<ImaxCliRuntimeState> {
     }
 }
 
-async fn run_server(port: u16) -> anyhow::Result<()> {
+fn iso_utc_timestamp() -> String {
+    let now = std::time::SystemTime::now();
+    let secs = now.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    let s = secs % 60;
+    let m = (secs / 60) % 60;
+    let h = (secs / 3600) % 24;
+    let days = secs / 86400;
+    let mut y = 1970;
+    let mut rem_days = days;
+    loop {
+        let leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+        let d_in_y = if leap { 366 } else { 365 };
+        if rem_days < d_in_y { break; }
+        rem_days -= d_in_y;
+        y += 1;
+    }
+    let leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+    let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut mon = 1;
+    for &md in &month_days {
+        if rem_days < md { break; }
+        rem_days -= md;
+        mon += 1;
+    }
+    let day = rem_days + 1;
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mon, day, h, m, s)
+}
+
+async fn setup_app_state(port: u16) -> anyhow::Result<(AppState, tokio::net::TcpListener, Router)> {
     let (ws_tx, _) = broadcast::channel(128);
-    let devices_path = std::path::PathBuf::from("devices.json");
+    let devices_path = resolve_fleet_config_path();
     let settings_path = std::path::PathBuf::from("settings.json");
 
     let saved_settings = if settings_path.exists() {
@@ -780,12 +839,13 @@ async fn run_server(port: u16) -> anyhow::Result<()> {
         settings_path,
     };
 
-    // Auto-hydrate fleet from devices.json
+    // Auto-hydrate fleet from bulbs.json (or devices.json fallback)
     let saved_devices = load_devices_json(&devices_path);
     if !saved_devices.is_empty() {
         log::info!(
-            "Auto-hydrating fleet with {} bulb(s) from devices.json...",
-            saved_devices.len()
+            "Auto-hydrating fleet with {} bulb(s) from {}...",
+            saved_devices.len(),
+            devices_path.display()
         );
         for rec in saved_devices {
             let bulb_cfg = BulbConfig {
@@ -808,16 +868,78 @@ async fn run_server(port: u16) -> anyhow::Result<()> {
     // Spawn unified background worker (handles Beat-Sync, in-process IMAX mode, and external IMAX CLI telemetry)
     tokio::spawn(beat_sync_background_worker(state.clone()));
 
-    let app = build_router(state);
+    let app = build_router(state.clone());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     log::info!("IOT-Bulb Sync server running on http://localhost:{}", port);
     log::info!("Web Dashboard available at http://localhost:{}", port);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    Ok((state, listener, app))
+}
 
+async fn run_server(port: u16) -> anyhow::Result<()> {
+    let (_state, listener, app) = setup_app_state(port).await?;
+    axum::serve(listener, app).await?;
     Ok(())
+}
+
+async fn run_tui_mode(port: u16) -> anyhow::Result<()> {
+    let (state, listener, app) = setup_app_state(port).await?;
+    state.sync_running.store(true, Ordering::Relaxed);
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tui::run_tui(state).await?;
+    Ok(())
+}
+
+async fn save_fleet_config(
+    State(state): State<AppState>,
+    body: Option<Json<Vec<SavedDeviceRecord>>>,
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    let bulbs_path = std::path::PathBuf::from("bulbs.json");
+    let mut records = if let Some(Json(custom_records)) = body {
+        if !custom_records.is_empty() {
+            custom_records
+        } else {
+            load_devices_json(&state.devices_path)
+        }
+    } else {
+        load_devices_json(&state.devices_path)
+    };
+
+    let fleet_bulbs = state.fleet.list_bulbs().await;
+    if records.is_empty() && !fleet_bulbs.is_empty() {
+        for b in &fleet_bulbs {
+            records.push(SavedDeviceRecord {
+                name: b.name.clone(),
+                id: b.id.clone(),
+                key: "".to_string(),
+                ip: b.address.clone(),
+                version: "3.5".to_string(),
+                bulb_type: Some(b.bulb_type),
+                mac: b.mac.clone(),
+            });
+        }
+    }
+
+    save_devices_json(&bulbs_path, &records).map_err(|e| {
+        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
+
+    if state.devices_path != bulbs_path {
+        let _ = save_devices_json(&state.devices_path, &records);
+    }
+
+    let timestamp = iso_utc_timestamp();
+
+    Ok(Json(serde_json::json!({
+        "saved": true,
+        "path": "bulbs.json",
+        "count": records.len(),
+        "timestamp": timestamp
+    })))
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -827,6 +949,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/audio/devices", get(get_audio_devices))
         .route("/api/imax/displays", get(get_imax_displays))
         .route("/api/bulbs", get(list_bulbs).post(add_bulb))
+        .route("/api/bulbs/save-config", post(save_fleet_config))
         .route("/api/bulbs/:id", patch(rename_bulb).delete(remove_bulb))
         .route("/api/bulbs/:id/power", post(set_bulb_power))
         .route("/api/bulbs/:id/color", post(set_bulb_color))
@@ -887,6 +1010,8 @@ async fn beat_sync_background_worker(state: AppState) {
                 active_brightness: ext_imax.active_brightness,
                 active_rgb: ext_imax.active_rgb,
                 agc_gain: 1.0,
+                effective_color_frequency: 0.70,
+                effective_color_interval_ms: 160,
             };
             let _ = state.ws_tx.send(telemetry);
             tokio::time::sleep(Duration::from_millis(60)).await;
@@ -930,42 +1055,41 @@ async fn beat_sync_background_worker(state: AppState) {
             let sleep_ms = (1000 / imax_engine.cfg.target_fps.max(1) as u64).max(15);
             tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
 
-            #[cfg(target_os = "macos")]
+            if let Some((color, brightness, is_cut)) =
+                beat_sync::imax::macos_capture::capture_screen_frame(
+                    settings.imax_display,
+                    &mut imax_engine,
+                )
             {
-                if let Some((color, brightness, is_cut)) =
-                    beat_sync::imax::macos_capture::capture_screen_frame(
-                        settings.imax_display,
-                        &mut imax_engine,
-                    )
-                {
-                    let (r, g, b) = color.to_rgb();
-                    let telemetry = WsTelemetry {
-                        engine_mode: ActiveEngineMode::Imax,
-                        imax_cli_active: false,
-                        is_kick: is_cut,
-                        is_snare: false,
-                        is_vocal_onset: false,
-                        has_instruments: true,
-                        instrument_score: 1.0,
-                        active_gradual: !is_cut,
-                        current_db: -18.0,
-                        gate_open: true,
-                        bass_intensity: if is_cut { 0.85 } else { 0.25 },
-                        snare_intensity: 0.0,
-                        instrument_intensity: (brightness as f32 / 1000.0).clamp(0.0, 1.0),
-                        vocal_intensity: 0.0,
-                        overall_energy: (brightness as f32 / 1000.0).clamp(0.0, 1.0),
-                        active_hue: color.h,
-                        active_brightness: brightness,
-                        active_rgb: (r, g, b),
-                        agc_gain: 1.0,
-                    };
-                    let _ = state.ws_tx.send(telemetry);
-                    state
-                        .fleet
-                        .broadcast_music_frame(color, brightness, 500, !is_cut)
-                        .await;
-                }
+                let (r, g, b) = color.to_rgb();
+                let telemetry = WsTelemetry {
+                    engine_mode: ActiveEngineMode::Imax,
+                    imax_cli_active: false,
+                    is_kick: is_cut,
+                    is_snare: false,
+                    is_vocal_onset: false,
+                    has_instruments: true,
+                    instrument_score: 1.0,
+                    active_gradual: !is_cut,
+                    current_db: -18.0,
+                    gate_open: true,
+                    bass_intensity: if is_cut { 0.85 } else { 0.25 },
+                    snare_intensity: 0.0,
+                    instrument_intensity: (brightness as f32 / 1000.0).clamp(0.0, 1.0),
+                    vocal_intensity: 0.0,
+                    overall_energy: (brightness as f32 / 1000.0).clamp(0.0, 1.0),
+                    active_hue: color.h,
+                    active_brightness: brightness,
+                    active_rgb: (r, g, b),
+                    agc_gain: 1.0,
+                    effective_color_frequency: 0.70,
+                    effective_color_interval_ms: 160,
+                };
+                let _ = state.ws_tx.send(telemetry);
+                state
+                    .fleet
+                    .broadcast_music_frame(color, brightness, 500, !is_cut)
+                    .await;
             }
             continue;
         }
@@ -1038,6 +1162,8 @@ async fn beat_sync_background_worker(state: AppState) {
                             active_brightness: cmd.brightness,
                             active_rgb: (r, g, b),
                             agc_gain: detector.current_gain(),
+                            effective_color_frequency: choreographer.effective_color_frequency(),
+                            effective_color_interval_ms: choreographer.effective_color_interval_ms(),
                         };
 
                         let _ = state.ws_tx.send(telemetry);
@@ -1625,6 +1751,15 @@ mod tests {
         assert!(html_str.contains("threeCanvas"), "Dashboard must contain full-viewport canvas");
         assert!(html_str.contains("IOT-Bulb Sync"), "Dashboard must contain IOT-Bulb Sync brand");
         assert!(!html_str.contains("YouTube Ambient"), "YouTube Ambient must be removed");
+        assert!(html_str.contains("uWaveGain"), "Vertex shader must include uWaveGain");
+        assert!(html_str.contains("uMeshFrequency"), "Vertex shader must include uMeshFrequency");
+        assert!(html_str.contains("uFlowVelocity"), "Vertex shader must include uFlowVelocity");
+        assert!(html_str.contains("uSwirlTurbulence"), "Vertex shader must include uSwirlTurbulence");
+        assert!(html_str.contains("uMasterLuminance"), "Shader must include uMasterLuminance");
+        assert!(html_str.contains("uStemGeometryBias"), "Vertex shader must include uStemGeometryBias");
+        assert!(html_str.contains("uColorTertiary"), "Fragment shader must include 3-stop uColorTertiary");
+        assert!(html_str.contains("saveConfigJsonBtn"), "Dashboard must include Save bulbs.json button");
+        assert!(html_str.contains("PALETTE_STOPS"), "Dashboard must define canonical PALETTE_STOPS");
     }
 
     #[tokio::test]
@@ -1682,4 +1817,46 @@ mod tests {
 
         let _ = std::fs::remove_file("settings_test.json");
     }
+
+    #[tokio::test]
+    async fn test_save_bulbs_config_api() {
+        let state = test_app_state();
+        let mut app = build_router(state);
+
+        let payload = serde_json::json!([
+            {
+                "id": "test_bulb_01",
+                "name": "Living Room Key Light",
+                "key": "0123456789abcdef",
+                "ip": "192.168.1.105",
+                "version": "3.5"
+            }
+        ]);
+
+        let response = app
+            .call(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/bulbs/save-config")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json_val: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json_val["saved"], true);
+        assert_eq!(json_val["path"], "bulbs.json");
+        assert_eq!(json_val["count"], 1);
+        assert!(json_val["timestamp"].is_string());
+
+        let _ = std::fs::remove_file("bulbs.json");
+        let _ = std::fs::remove_file("devices_test.json");
+    }
 }
+

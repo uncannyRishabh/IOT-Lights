@@ -1,5 +1,6 @@
 //! Lighting Choreography, Color Palettes, and Hardware Rate Limiting.
 
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 use tuya_bulb::BulbColor;
 use crate::dsp::BeatEvent;
@@ -86,6 +87,8 @@ pub struct Choreographer {
     pub invert_auto_gradual: bool,
     pub transition_speed: f32,
     pub color_frequency: f32,
+    pub live_color_frequency: f32,
+    pub onset_history: VecDeque<Instant>,
     pub quiet_frames: u32,
     pub rest_sent: bool,
 }
@@ -125,9 +128,52 @@ impl Choreographer {
             invert_auto_gradual: false,
             transition_speed: 0.65,
             color_frequency: 0.70,
+            live_color_frequency: 0.70,
+            onset_history: VecDeque::with_capacity(16),
             quiet_frames: 0,
             rest_sent: false,
         }
+    }
+
+    /// Applies mode-specific chromatic styling so DarkMode and LightMode never converge to the same color.
+    pub fn apply_ambience_chromatic_profile(
+        &self,
+        raw_hue: f32,
+        raw_sat: f32,
+        raw_val: f32,
+        energy: f32,
+    ) -> (f32, f32, f32) {
+        match self.ambience_mode {
+            BulbAmbienceMode::DarkMode => {
+                // Deep Club Neon: hyper-saturated (0.92 - 1.0), crisp deep-club hue snap
+                let sat = (raw_sat * 1.08).clamp(0.92, 1.0);
+                let val = (raw_val * (0.75 + 0.25 * energy)).clamp(0.65, 1.0);
+                (raw_hue.rem_euclid(360.0), sat, val)
+            }
+            BulbAmbienceMode::LightMode => {
+                // Room Fill Pastel/Warm: compress harsh blues/reds toward warm golden/teal/lavender
+                // and cap saturation to 0.38..0.66 so bulbs emit airy pastel daylight tones
+                let warm_shifted_hue = {
+                    let diff_to_warm = ((38.0 - raw_hue + 540.0).rem_euclid(360.0)) - 180.0;
+                    (raw_hue + diff_to_warm * 0.22).rem_euclid(360.0)
+                };
+                let sat = (raw_sat * (0.45 + 0.18 * energy)).clamp(0.38, 0.66);
+                let val = (raw_val * 0.96).clamp(0.88, 1.0);
+                (warm_shifted_hue, sat, val)
+            }
+        }
+    }
+
+    pub fn effective_color_frequency(&self) -> f32 {
+        if self.transition_mode == TransitionMode::Auto {
+            self.live_color_frequency
+        } else {
+            self.color_frequency
+        }
+    }
+
+    pub fn effective_color_interval_ms(&self) -> u32 {
+        self.min_beat_interval.as_millis() as u32
     }
 
     pub fn set_palette(&mut self, palette: ColorPalette) {
@@ -236,6 +282,26 @@ impl Choreographer {
     pub fn handle_event(&mut self, event: &BeatEvent) -> Option<ChoreographedCommand> {
         let now = Instant::now();
 
+        if event.is_kick || event.is_snare || event.is_vocal_onset {
+            self.onset_history.push_back(now);
+            if self.onset_history.len() > 16 {
+                self.onset_history.pop_front();
+            }
+        }
+        self.onset_history.retain(|&t| now.duration_since(t).as_secs_f32() <= 2.5);
+
+        let density = (self.onset_history.len() as f32 / 2.5).min(6.0);
+        let e_inst = event.instrument_intensity;
+        let e_flux = (event.spectral_flux / 400.0).clamp(0.0, 1.0);
+        let f_target = (0.15 + 0.45 * (density / 4.2).min(1.0) + 0.25 * e_inst + 0.15 * e_flux).clamp(0.12, 0.98);
+
+        let alpha_track = if f_target > self.live_color_frequency {
+            0.45
+        } else {
+            0.06
+        };
+        self.live_color_frequency = (1.0 - alpha_track) * self.live_color_frequency + alpha_track * f_target;
+
         if event.overall_energy < 0.15 && !event.is_kick && !event.is_snare && !event.is_vocal_onset {
             self.quiet_frames = self.quiet_frames.saturating_add(1);
         } else {
@@ -247,8 +313,13 @@ impl Choreographer {
             return None;
         }
 
-        let min_beat_ms = (320.0 - 225.0 * self.color_frequency).round().max(75.0) as u64;
-        let stag_ms = (1600.0 - 1220.0 * self.color_frequency).round().max(250.0) as u64;
+        let effective_freq = if self.transition_mode == TransitionMode::Auto {
+            self.live_color_frequency
+        } else {
+            self.color_frequency
+        };
+        let min_beat_ms = (320.0 - 225.0 * effective_freq).round().max(75.0) as u64;
+        let stag_ms = (1600.0 - 1220.0 * effective_freq).round().max(250.0) as u64;
         self.min_beat_interval = Duration::from_millis(min_beat_ms);
         self.stagnation_timeout = Duration::from_millis(stag_ms);
 
@@ -290,7 +361,7 @@ impl Choreographer {
 
             raw_brightness = match self.ambience_mode {
                 BulbAmbienceMode::DarkMode => 350.0 + (event.bass_intensity * 650.0),
-                BulbAmbienceMode::LightMode => 650.0 + (event.bass_intensity * 350.0),
+                BulbAmbienceMode::LightMode => 650.0 + (event.bass_intensity * 300.0),
             };
         } else if event.is_snare {
             self.last_command_time = now;
@@ -308,7 +379,7 @@ impl Choreographer {
 
             raw_brightness = match self.ambience_mode {
                 BulbAmbienceMode::DarkMode => 250.0 + (event.snare_intensity * 600.0),
-                BulbAmbienceMode::LightMode => 600.0 + (event.snare_intensity * 380.0),
+                BulbAmbienceMode::LightMode => 600.0 + (event.snare_intensity * 320.0),
             };
         } else if event.is_vocal_onset {
             self.last_command_time = now;
@@ -320,13 +391,13 @@ impl Choreographer {
 
             raw_brightness = match self.ambience_mode {
                 BulbAmbienceMode::DarkMode => 200.0 + (event.vocal_intensity * 500.0),
-                BulbAmbienceMode::LightMode => 550.0 + (event.vocal_intensity * 350.0),
+                BulbAmbienceMode::LightMode => 580.0 + (event.vocal_intensity * 300.0),
             };
         } else if event.overall_energy > 0.45 {
             self.last_command_time = now;
             raw_brightness = match self.ambience_mode {
                 BulbAmbienceMode::DarkMode => 100.0 + (event.overall_energy * 350.0),
-                BulbAmbienceMode::LightMode => 550.0 + (event.overall_energy * 300.0),
+                BulbAmbienceMode::LightMode => 580.0 + (event.overall_energy * 300.0),
             };
         } else if self.quiet_frames >= 30 && !self.rest_sent {
             self.last_command_time = now;
@@ -335,18 +406,18 @@ impl Choreographer {
             self.target_val = 0.50;
 
             raw_brightness = match self.ambience_mode {
-                BulbAmbienceMode::DarkMode => 25.0,
-                BulbAmbienceMode::LightMode => 500.0,
+                BulbAmbienceMode::DarkMode => 15.0,
+                BulbAmbienceMode::LightMode => 580.0,
             };
         } else if self.quiet_frames < 30 {
             self.last_command_time = now;
             let floor = match self.ambience_mode {
-                BulbAmbienceMode::DarkMode => 20.0,
-                BulbAmbienceMode::LightMode => 520.0,
+                BulbAmbienceMode::DarkMode => 15.0,
+                BulbAmbienceMode::LightMode => 580.0,
             };
             let decay = match self.ambience_mode {
-                BulbAmbienceMode::DarkMode => 0.78,
-                BulbAmbienceMode::LightMode => 0.92,
+                BulbAmbienceMode::DarkMode => 0.74,
+                BulbAmbienceMode::LightMode => 0.94,
             };
             raw_brightness = (self.current_brightness as f32 * decay).max(floor);
         } else {
@@ -374,7 +445,13 @@ impl Choreographer {
         let scaled_brightness = ((raw_brightness * self.master_brightness).round().clamp(10.0, 1000.0)) as u32;
         self.current_brightness = scaled_brightness;
 
-        let color = BulbColor::from_hsv(self.current_hue, self.current_sat, self.current_val);
+        let (final_hue, final_sat, final_val) = self.apply_ambience_chromatic_profile(
+            self.current_hue,
+            self.current_sat,
+            self.current_val,
+            event.overall_energy,
+        );
+        let color = BulbColor::from_hsv(final_hue, final_sat, final_val);
 
         Some(ChoreographedCommand {
             color,
@@ -513,4 +590,80 @@ mod tests {
         ch.set_custom_palette(custom_swatches);
         assert_eq!(ch.custom_palette.len(), 2);
     }
+
+    #[test]
+    fn auto_color_change_frequency_adapts_to_fast_beats_and_slow_passages() {
+        let mut ch = Choreographer::new(25, ColorPalette::Cyberpunk);
+        ch.set_transition_mode(TransitionMode::Auto);
+        let initial_freq = ch.effective_color_frequency();
+
+        // Feed rapid kicks
+        let fast_kick = BeatEvent {
+            is_kick: true,
+            is_snare: false,
+            is_vocal_onset: false,
+            bass_intensity: 0.95,
+            snare_intensity: 0.1,
+            instrument_intensity: 0.9,
+            vocal_intensity: 0.0,
+            overall_energy: 0.9,
+            spectral_flux: 350.0,
+            current_db: -10.0,
+            gate_open: true,
+            instrument_presence: InstrumentPresence {
+                has_instruments: true,
+                instrument_score: 0.9,
+            },
+        };
+
+        for _ in 0..8 {
+            ch.last_command_time = Instant::now() - Duration::from_millis(50);
+            ch.handle_event(&fast_kick);
+        }
+
+        let fast_freq = ch.effective_color_frequency();
+        assert!(
+            fast_freq > initial_freq,
+            "Fast kicks must accelerate live_color_frequency, got {} vs initial {}",
+            fast_freq,
+            initial_freq
+        );
+        assert!(
+            ch.effective_color_interval_ms() <= 160,
+            "Fast beats should reduce color interval, got {}ms",
+            ch.effective_color_interval_ms()
+        );
+    }
+
+    #[test]
+    fn chromatic_separation_dark_mode_vs_light_mode_never_converge() {
+        let mut ch_dark = Choreographer::new(20, ColorPalette::Synthwave);
+        ch_dark.set_ambience_mode(BulbAmbienceMode::DarkMode);
+
+        let mut ch_light = Choreographer::new(20, ColorPalette::Synthwave);
+        ch_light.set_ambience_mode(BulbAmbienceMode::LightMode);
+
+        let raw_h = 240.0; // Cool Blue
+        let raw_s = 1.0;
+        let raw_v = 1.0;
+        let energy = 0.8;
+
+        let (dark_h, dark_s, _dark_v) = ch_dark.apply_ambience_chromatic_profile(raw_h, raw_s, raw_v, energy);
+        let (light_h, light_s, _light_v) = ch_light.apply_ambience_chromatic_profile(raw_h, raw_s, raw_v, energy);
+
+        // DarkMode is hyper-saturated neon (>= 0.92)
+        assert!(dark_s >= 0.92, "DarkMode saturation must be high neon, got {}", dark_s);
+
+        // LightMode desaturates into soft pastel (0.38 - 0.66) and shifts warm
+        assert!(
+            light_s <= 0.66 && light_s >= 0.38,
+            "LightMode saturation must be pastel (0.38..0.66), got {}",
+            light_s
+        );
+        assert_ne!(
+            dark_h, light_h,
+            "LightMode must warm-shift cool blues away from pure neon"
+        );
+    }
 }
+

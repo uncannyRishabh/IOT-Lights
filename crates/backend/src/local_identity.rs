@@ -22,6 +22,15 @@ fn default_version() -> String {
     "3.5".to_string()
 }
 
+pub fn resolve_fleet_config_path() -> std::path::PathBuf {
+    let bulbs = Path::new("bulbs.json");
+    if bulbs.exists() {
+        bulbs.to_path_buf()
+    } else {
+        std::path::PathBuf::from("devices.json")
+    }
+}
+
 pub fn load_devices_json(path: &Path) -> Vec<SavedDeviceRecord> {
     std::fs::read_to_string(path)
         .ok()
@@ -31,23 +40,65 @@ pub fn load_devices_json(path: &Path) -> Vec<SavedDeviceRecord> {
 
 pub fn save_devices_json(path: &Path, records: &[SavedDeviceRecord]) -> anyhow::Result<()> {
     let json = serde_json::to_string_pretty(records)?;
-    std::fs::write(path, json)?;
+    let tmp_path = path.with_extension(format!("tmp.{}", std::process::id()));
+    std::fs::write(&tmp_path, json)?;
+    std::fs::rename(&tmp_path, path)?;
     Ok(())
 }
 
 /// Resolves MAC address from the OS ARP cache for a local IPv4 address without root privileges.
 pub fn lookup_arp_mac(ip: &str) -> Option<String> {
-    let out = Command::new("arp").args(["-n", ip]).output().ok()?;
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    for token in stdout.split_whitespace() {
-        if token.chars().filter(|&c| c == ':').count() == 5 && token.len() >= 11 {
-            // Normalize macOS single-digit hex octets (e.g. 38:2c:e5:86:83:7b)
-            let normalized = token
-                .split(':')
-                .map(|part| format!("{:0>2}", part.to_lowercase()))
-                .collect::<Vec<_>>()
-                .join(":");
-            return Some(normalized);
+    #[cfg(target_os = "linux")]
+    {
+        // 1. Direct /proc/net/arp read (zero subprocess spawn!)
+        if let Ok(arp_table) = std::fs::read_to_string("/proc/net/arp") {
+            for line in arp_table.lines().skip(1) {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 4 && parts[0] == ip {
+                    let mac = parts[3].to_lowercase();
+                    if mac != "00:00:00:00:00:00" && mac.contains(':') {
+                        return Some(mac);
+                    }
+                }
+            }
+        }
+        // Fallback: ip neigh show <ip>
+        if let Ok(out) = Command::new("ip").args(["neigh", "show", ip]).output() {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            for token in stdout.split_whitespace() {
+                if token.chars().filter(|&c| c == ':').count() == 5 {
+                    return Some(token.to_lowercase());
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(out) = Command::new("arp").args(["-a", ip]).output() {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            for token in stdout.split_whitespace() {
+                if token.chars().filter(|&c| c == '-').count() == 5 && token.len() >= 17 {
+                    let normalized = token.replace('-', ":").to_lowercase();
+                    return Some(normalized);
+                }
+            }
+        }
+    }
+
+    // macOS / BSD / fallback
+    if let Ok(out) = Command::new("arp").args(["-n", ip]).output() {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        for token in stdout.split_whitespace() {
+            if token.chars().filter(|&c| c == ':').count() == 5 && token.len() >= 11 {
+                // Normalize macOS single-digit hex octets (e.g. 38:2c:e5:86:83:7b)
+                let normalized = token
+                    .split(':')
+                    .map(|part| format!("{:0>2}", part.to_lowercase()))
+                    .collect::<Vec<_>>()
+                    .join(":");
+                return Some(normalized);
+            }
         }
     }
     None

@@ -514,8 +514,64 @@ pub mod macos_capture {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-pub mod macos_capture {
+#[cfg(target_os = "macos")]
+pub use macos_capture as screen_capture;
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub mod screen_capture {
+    use super::*;
+
+    pub fn list_displays() -> Vec<DisplayInfo> {
+        match xcap::Monitor::all() {
+            Ok(monitors) => monitors
+                .into_iter()
+                .enumerate()
+                .map(|(idx, m)| {
+                    let w = m.width();
+                    let h = m.height();
+                    let is_pri = m.is_primary();
+                    let name = m.name().to_string();
+                    DisplayInfo {
+                        index: idx as u32,
+                        display_id: m.id(),
+                        width: w,
+                        height: h,
+                        is_main: is_pri,
+                        name: format!(
+                            "Display #{} — {} ({}×{}{})",
+                            idx,
+                            name,
+                            w,
+                            h,
+                            if is_pri { ", Primary" } else { "" }
+                        ),
+                    }
+                })
+                .collect(),
+            Err(_) => vec![],
+        }
+    }
+
+    pub fn capture_screen_frame(
+        display_idx: u32,
+        engine: &mut ImaxEngine,
+    ) -> Option<(BulbColor, u32, bool)> {
+        let monitors = xcap::Monitor::all().ok()?;
+        let monitor = monitors.into_iter().nth(display_idx as usize)?;
+        let img = monitor.capture_image().ok()?;
+        let w = img.width() as usize;
+        let h = img.height() as usize;
+        let raw = img.into_raw();
+        let res = engine.process_rgba_with_cut_flag(&raw, w, h, w * 4, false);
+        Some(res)
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub use screen_capture as macos_capture;
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+pub mod screen_capture {
     use super::*;
 
     pub fn list_displays() -> Vec<DisplayInfo> {
@@ -525,10 +581,20 @@ pub mod macos_capture {
             width: 1920,
             height: 1080,
             is_main: true,
-            name: "Display #0 (Primary — 1920×1080)".to_string(),
+            name: "Display #0 (Default — 1920×1080)".to_string(),
         }]
     }
+
+    pub fn capture_screen_frame(
+        _display_idx: u32,
+        _engine: &mut ImaxEngine,
+    ) -> Option<(BulbColor, u32, bool)> {
+        None
+    }
 }
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+pub use screen_capture as macos_capture;
 
 #[inline]
 fn srgb_to_oklab(r: f32, g: f32, b: f32) -> [f32; 3] {

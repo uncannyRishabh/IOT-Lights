@@ -26,8 +26,9 @@ Unlike traditional cloud integrations that suffer from 200–800ms internet dela
   - [1. Clone & Build](#1-clone--build)
   - [2. Configure Devices](#2-configure-devices)
   - [3. Start the Web Dashboard](#3-start-the-web-dashboard)
-  - [4. Direct Command-Line Control](#4-direct-command-line-control)
-  - [5. Standalone Beat-Sync CLI](#5-standalone-beat-sync-cli)
+  - [4. Interactive Truecolor Terminal Visualizer (TUI)](#4-interactive-truecolor-terminal-visualizer-tui)
+  - [5. Standalone Beat-Sync & Screen-Sync CLI](#5-standalone-beat-sync--screen-sync-cli)
+  - [6. Direct Command-Line Control](#6-direct-command-line-control)
 - [Frequently Asked Questions (FAQ) & Troubleshooting](#-frequently-asked-questions-faq--troubleshooting)
   - [Local Key Questions](#local-key-questions)
   - [Connectivity & Protocol Versions](#connectivity--protocol-versions)
@@ -88,12 +89,14 @@ Before setting up IOT-Lights, ensure you have:
      ```bash
      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
      ```
-4. **Audio Subsystem**:
-   - **macOS**: Built-in CoreAudio works out of the box. To sync system sound (Spotify, YouTube, DAW) instead of the microphone, install [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) and create a Multi-Output Device.
-   - **Linux**: Install ALSA development libraries:
+4. **Audio & Screen Capture Subsystems**:
+   - **macOS**: Built-in CoreAudio and Quartz/CoreGraphics work out of the box with zero runtime overhead. To sync system sound (Spotify, YouTube, DAW) instead of the microphone, install [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole) and create a Multi-Output Device.
+   - **Linux**: Install ALSA, X11, and RandR development libraries:
      ```bash
-     sudo apt update && sudo apt install libasound2-dev pkg-config
+     sudo apt update && sudo apt install libasound2-dev libx11-dev libxrandr-dev libxi-dev pkg-config
      ```
+     PipeWire / PulseAudio `.monitor` virtual audio sinks and X11/Wayland screen capture (`xcap`) are supported natively.
+   - **Windows**: Windows WASAPI loopback audio and Windows Graphics Capture / GDI (`xcap`) work natively with zero external drivers.
 5. **Python 3 & TinyTuya** (for one-time local key extraction):
    ```bash
    pip install tinytuya
@@ -204,13 +207,52 @@ Open your browser to:
 - **Mobile**: `http://<your-computer-ip>:8080` (accessible from your phone on the same Wi-Fi!)
 
 The dashboard gives you:
-- Live audio visualizer and beat telemetry via WebSockets.
-- One-click Start/Stop Beat Sync.
-- Audio input device selector (Microphone, Loopback, BlackHole).
-- Color theme presets: **Cyberpunk**, **Synthwave**, **Club Rave**, **Vaporwave**, **Ambient Chill**.
-- Local UDP network scanner to discover active bulbs.
+- **100% GPU Custom Shader Visualizer**: Palette-synchronized 3-stop elevation gradient terrain + circular particle orbs. Click the canvas anytime to toggle fullscreen immersion!
+- **Parameter-Driven Mesh Physics**: 5 core parameters (Onset Sensitivity, Transition Speed, Color Frequency, Master Brightness, Stem Focus) physically morph the 3D surface via damped springs.
+- **Adaptive Auto Color Change Frequency**: Real-time 16-entry onset density telemetry driving dynamic tempo-adaptive intervals with live slider feedback.
+- **Dark Mode vs. Light Mode Chromatic Separation**: Deep neon strobe dynamics in Dark Mode vs. warm pastel daylight room fill in Light Mode.
+- **Explicit Fleet Persistence**: Click **Save to bulbs.json** in the Fleet Rail header, or use the inline 16-char key field & **+ Pair & Save to JSON** button on any discovered LAN bulb.
 
-### 4. Direct Command-Line Control
+### 4. Interactive Truecolor Terminal Visualizer (TUI)
+Launch the zero-overhead, 30 FPS 24-bit ANSI Truecolor terminal controller:
+```bash
+target/release/iot-bulb-sync tui
+# or via startup script:
+./start.sh --tui
+```
+
+Features:
+- **80×24 ANSI Truecolor Spectrum**: 32-column Unicode waveform bar rendered in live bulb colors and active palette gradients.
+- **Dedicated Hardware Telemetry**: Live meters for `INSTRUMENT`, `VOCAL`, `NOISE GATE`, and `AUTO FREQ (ms / BPM)`.
+- **Fleet Table**: Real-time status for every configured bulb in `bulbs.json`.
+- **Instant Single-Keystroke Hotkeys**:
+  - `[M]` Toggle Beat Sync ↔ IMAX Screen Mode (hot-swaps engine in-place)
+  - `[D]` Cycle Target Display (when in IMAX mode with multiple monitors)
+  - `[P]` Pair / Scan LAN Devices (triggers UDP scan, lists devices, press 1–9 to enter local key)
+  - `[S]` Save Fleet Configuration & Settings atomically to `bulbs.json`
+  - `[Space]` Toggle Fleet Power ON/OFF
+  - `[Q]` / `[Esc]` Quit Gracefully (restores terminal raw mode and cursor)
+
+### 5. Standalone Beat-Sync & Screen-Sync CLI
+Run sub-10ms native screen compression (`64×36` Quartz/xcap downscaling) with **100% black-pixel rejection** and **Oklab Prominent Color Clustering** across your fleet from `bulbs.json`:
+```bash
+# IMAX Screen Sync across all platforms (macOS CoreGraphics, Linux/Windows xcap):
+target/release/iot-bulb-sync imax \
+  --fps 20 \
+  --smoothing 0.82 \
+  --saturation-boost 1.35 \
+  --color-mode prominent
+
+# Standalone Beat-Sync CLI for a single bulb:
+target/release/iot-bulb-sync sync \
+  --id "d79466ba2de1ef6565hrzd" \
+  --key 'qxkIfvV3p?KjPZ#7' \
+  --ip "192.168.1.2" \
+  --palette cyberpunk \
+  --version 3.5
+```
+
+### 6. Direct Command-Line Control
 To turn a bulb on/off or change its hue directly:
 ```bash
 # Turn ON and set color to Cyan (Hue 180°)
@@ -234,27 +276,6 @@ target/release/iot-bulb-sync control \
   --ip "192.168.1.2" \
   --power false --version 3.5
 ```
-
-### 5. Standalone Beat-Sync CLI
-Sync a single bulb directly from the terminal without opening the dashboard:
-```bash
-target/release/iot-bulb-sync sync \
-  --id "d79466ba2de1ef6565hrzd" \
-  --key 'qxkIfvV3p?KjPZ#7' \
-  --ip "192.168.1.2" \
-  --palette cyberpunk \
-  --version 3.5
-```
-
-### 6. High-Performance IMAX Screen Sync CLI (Prominent Color & Multi-Display)
-Run sub-10ms native screen compression (`64×36` Quartz downscaling) with **100% black-pixel rejection** and **Oklab Prominent Color Clustering** across your entire fleet from `devices.json`:
-```bash
-# If multiple monitors are detected and --display is omitted, IOT-Bulb Sync
-# interactively prompts you to choose which display to synchronize:
-target/release/iot-bulb-sync imax \
-  --fps 20 \
-  --smoothing 0.82 \
-  --saturation-boost 1.35 \
   --color-mode prominent \
   --min-brightness 25 \
   --max-brightness 1000
@@ -348,6 +369,5 @@ IOT-Lights stands on the shoulders of fantastic open-source projects:
 ---
 
 <p align="center">
-  <b>Run Anywhere — Powered by Pure Rust 🦀</b><br>
-  Made with ❤️ and pure Rust for ultra-low-latency lighting.
+  <b>Run Anywhere — Powered by Rust 🦀</b><br>
 </p>

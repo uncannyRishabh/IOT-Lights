@@ -439,9 +439,9 @@ impl BeatDetector {
             // B) Midrange / Formant region (260Hz - 3200Hz): Split via HPSS + Crest Factor
             else if (260.0..=3200.0).contains(&freq) {
                 vocal_band_bins += 1;
-                vocal_band_sum += mag_harmonic;
-                if mag_harmonic > vocal_band_max {
-                    vocal_band_max = mag_harmonic;
+                vocal_band_sum += mag;
+                if mag > vocal_band_max {
+                    vocal_band_max = mag;
                 }
                 harmonic_vocal_energy += mag_harmonic;
                 percussive_mid_energy += mag_percussive;
@@ -516,7 +516,8 @@ impl BeatDetector {
 
         let is_snare = self.config.focus_mode != AudioFocusMode::VocalsOnly
             && percussive_mid_energy > snare_thresh
-            && percussive_mid_energy > (self.config.min_snare_energy / sens);
+            && percussive_mid_energy > (self.config.min_snare_energy / sens)
+            && vocal_purity < 0.45;
 
         let is_vocal_onset = self.config.focus_mode != AudioFocusMode::InstrumentsOnly
             && isolated_vocal_energy > vocal_thresh
@@ -552,7 +553,13 @@ impl BeatDetector {
             AudioFocusMode::VocalsOnly => false,
             AudioFocusMode::InstrumentsOnly => true,
             AudioFocusMode::FullMix => {
-                if is_kick || is_snare || self.rolling_inst_score >= 0.42 {
+                let vocal_dominant =
+                    vocal_purity > 0.65 && vocal_intensity > 0.40 && instrument_intensity < 0.25;
+                if vocal_dominant && !is_kick && !is_snare {
+                    self.has_instruments_latched = false;
+                    self.instrument_hold_frames = 0;
+                    self.rolling_inst_score = (self.rolling_inst_score * 0.4).min(0.20);
+                } else if is_kick || is_snare || self.rolling_inst_score >= 0.42 {
                     self.has_instruments_latched = true;
                     self.instrument_hold_frames = 22; // ~330ms hold window
                 } else if self.instrument_hold_frames > 0 {
