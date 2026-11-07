@@ -1,4 +1,4 @@
-//! Lighting Choreography, Color Palettes, and Hardware Rate Limiting.
+//! Lighting Choreography, Color Palettes, Rhythm IOI Tracking, and Hardware Rate Limiting.
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -88,6 +88,8 @@ pub struct Choreographer {
     pub transition_speed: f32,
     pub color_frequency: f32,
     pub live_color_frequency: f32,
+    pub smoothed_ioi_sec: f32,
+    pub last_rhythm_onset: Instant,
     pub onset_history: VecDeque<Instant>,
     pub quiet_frames: u32,
     pub rest_sent: bool,
@@ -112,9 +114,9 @@ impl Choreographer {
             last_command_time: now,
             min_interval: Duration::from_millis(1000 / fps as u64),
             last_beat_time: now,
-            min_beat_interval: Duration::from_millis(160),
+            min_beat_interval: Duration::from_millis(180),
             last_color_change_time: now,
-            stagnation_timeout: Duration::from_millis(750),
+            stagnation_timeout: Duration::from_millis(1400),
             target_hue: initial_hue,
             target_sat: 1.0,
             target_val: 1.0,
@@ -128,7 +130,9 @@ impl Choreographer {
             invert_auto_gradual: false,
             transition_speed: 0.65,
             color_frequency: 0.70,
-            live_color_frequency: 0.70,
+            live_color_frequency: 0.48,
+            smoothed_ioi_sec: 0.50, // Default 120 BPM quarter-note period
+            last_rhythm_onset: now,
             onset_history: VecDeque::with_capacity(16),
             quiet_frames: 0,
             rest_sent: false,
@@ -282,23 +286,34 @@ impl Choreographer {
     pub fn handle_event(&mut self, event: &BeatEvent) -> Option<ChoreographedCommand> {
         let now = Instant::now();
 
+        // 1. Track Inter-Onset Intervals (IOI) & Rhythm Cadence strictly on real beat transients
         if event.is_kick || event.is_snare || event.is_vocal_onset {
+            let ioi_sec = now.duration_since(self.last_rhythm_onset).as_secs_f32();
+            if (0.04..=1.35).contains(&ioi_sec) {
+                self.smoothed_ioi_sec = 0.72 * self.smoothed_ioi_sec + 0.28 * ioi_sec.max(0.14);
+            }
+            self.last_rhythm_onset = now;
             self.onset_history.push_back(now);
             if self.onset_history.len() > 16 {
                 self.onset_history.pop_front();
             }
+        } else if now.duration_since(self.last_rhythm_onset).as_secs_f32() > 1.4 {
+            // Gently relax beat period toward slow ambient tempo when beats pause
+            self.smoothed_ioi_sec = (self.smoothed_ioi_sec * 1.02).min(0.95);
         }
         self.onset_history.retain(|&t| now.duration_since(t).as_secs_f32() <= 2.5);
 
-        let density = (self.onset_history.len() as f32 / 2.5).min(6.0);
-        let e_inst = event.instrument_intensity;
-        let e_flux = (event.spectral_flux / 400.0).clamp(0.0, 1.0);
-        let f_target = (0.15 + 0.45 * (density / 4.2).min(1.0) + 0.25 * e_inst + 0.15 * e_flux).clamp(0.12, 0.98);
+        // Compute rhythm-driven Auto Color Change Frequency from IOI tempo + onset cadence
+        // (Does NOT peg to 80% on steady instrument loudness!)
+        let cadence_hz = (self.onset_history.len() as f32 / 2.5).min(5.0);
+        let ioi_tempo_norm = ((0.90 - self.smoothed_ioi_sec) / 0.72).clamp(0.0, 1.0);
+        let cadence_norm = (cadence_hz / 4.2).clamp(0.0, 1.0);
+        let f_target = (0.14 + 0.52 * ioi_tempo_norm + 0.30 * cadence_norm).clamp(0.14, 0.94);
 
         let alpha_track = if f_target > self.live_color_frequency {
-            0.45
+            0.35
         } else {
-            0.06
+            0.08
         };
         self.live_color_frequency = (1.0 - alpha_track) * self.live_color_frequency + alpha_track * f_target;
 
@@ -319,7 +334,12 @@ impl Choreographer {
             self.color_frequency
         };
         let min_beat_ms = (320.0 - 225.0 * effective_freq).round().max(75.0) as u64;
-        let stag_ms = (1600.0 - 1220.0 * effective_freq).round().max(250.0) as u64;
+        // In Auto mode, keep stagnation timeout >= 1350ms so colors step on real beats rather than raw loudness
+        let stag_ms = if self.transition_mode == TransitionMode::Auto {
+            (1800.0 - 550.0 * effective_freq).round().max(1300.0) as u64
+        } else {
+            (1600.0 - 1220.0 * effective_freq).round().max(250.0) as u64
+        };
         self.min_beat_interval = Duration::from_millis(min_beat_ms);
         self.stagnation_timeout = Duration::from_millis(stag_ms);
 
@@ -597,7 +617,6 @@ mod tests {
         ch.set_transition_mode(TransitionMode::Auto);
         let initial_freq = ch.effective_color_frequency();
 
-        // Feed rapid kicks
         let fast_kick = BeatEvent {
             is_kick: true,
             is_snare: false,
@@ -618,6 +637,7 @@ mod tests {
 
         for _ in 0..8 {
             ch.last_command_time = Instant::now() - Duration::from_millis(50);
+            ch.last_rhythm_onset = Instant::now() - Duration::from_millis(220);
             ch.handle_event(&fast_kick);
         }
 
@@ -629,7 +649,7 @@ mod tests {
             initial_freq
         );
         assert!(
-            ch.effective_color_interval_ms() <= 160,
+            ch.effective_color_interval_ms() <= 165,
             "Fast beats should reduce color interval, got {}ms",
             ch.effective_color_interval_ms()
         );
@@ -643,7 +663,7 @@ mod tests {
         let mut ch_light = Choreographer::new(20, ColorPalette::Synthwave);
         ch_light.set_ambience_mode(BulbAmbienceMode::LightMode);
 
-        let raw_h = 240.0; // Cool Blue
+        let raw_h = 240.0;
         let raw_s = 1.0;
         let raw_v = 1.0;
         let energy = 0.8;
@@ -651,10 +671,7 @@ mod tests {
         let (dark_h, dark_s, _dark_v) = ch_dark.apply_ambience_chromatic_profile(raw_h, raw_s, raw_v, energy);
         let (light_h, light_s, _light_v) = ch_light.apply_ambience_chromatic_profile(raw_h, raw_s, raw_v, energy);
 
-        // DarkMode is hyper-saturated neon (>= 0.92)
         assert!(dark_s >= 0.92, "DarkMode saturation must be high neon, got {}", dark_s);
-
-        // LightMode desaturates into soft pastel (0.38 - 0.66) and shifts warm
         assert!(
             light_s <= 0.66 && light_s >= 0.38,
             "LightMode saturation must be pastel (0.38..0.66), got {}",
@@ -666,4 +683,3 @@ mod tests {
         );
     }
 }
-

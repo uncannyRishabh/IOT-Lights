@@ -3,11 +3,12 @@
 pub mod local_identity;
 pub mod tui;
 
+use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::extract::ws::{Message as AxumWsMsg, WebSocket, WebSocketUpgrade};
@@ -329,9 +330,64 @@ const FAVICON_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0
   <line x1="29" y1="54" x2="35" y2="54" stroke="#94A3B8" stroke-width="2.6" stroke-linecap="round"/>
 </svg>"##;
 
+static TUI_RUNNING: AtomicBool = AtomicBool::new(false);
+static LOG_RING_BUFFER: Mutex<Option<VecDeque<String>>> = Mutex::new(None);
+
+pub fn set_tui_running(running: bool) {
+    TUI_RUNNING.store(running, Ordering::SeqCst);
+}
+
+pub fn get_latest_log() -> Option<String> {
+    if let Ok(guard) = LOG_RING_BUFFER.lock() {
+        guard.as_ref().and_then(|q| q.back().cloned())
+    } else {
+        None
+    }
+}
+
+struct TuiAwareLogger {
+    default_level: log::LevelFilter,
+}
+
+impl log::Log for TuiAwareLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= self.default_level
+    }
+
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+
+        let msg = format!("{}", record.args());
+        if let Ok(mut guard) = LOG_RING_BUFFER.lock() {
+            let q = guard.get_or_insert_with(|| VecDeque::with_capacity(32));
+            if q.len() >= 32 {
+                q.pop_front();
+            }
+            q.push_back(msg.clone());
+        }
+
+        if !TUI_RUNNING.load(Ordering::Relaxed) {
+            eprintln!(
+                "[{:5} {}] {}",
+                record.level(),
+                record.target(),
+                record.args()
+            );
+        }
+    }
+
+    fn flush(&self) {}
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    let logger = TuiAwareLogger {
+        default_level: log::LevelFilter::Info,
+    };
+    let _ = log::set_boxed_logger(Box::new(logger));
+    log::set_max_level(log::LevelFilter::Info);
 
     let cli = Cli::parse();
 
@@ -848,6 +904,8 @@ async fn setup_app_state(port: u16) -> anyhow::Result<(AppState, tokio::net::Tcp
             devices_path.display()
         );
         for rec in saved_devices {
+            let id = rec.id.clone();
+            let sync_excluded = rec.sync_excluded;
             let bulb_cfg = BulbConfig {
                 id: rec.id,
                 name: rec.name,
@@ -861,6 +919,9 @@ async fn setup_app_state(port: u16) -> anyhow::Result<(AppState, tokio::net::Tcp
             };
             if let Err(e) = state.fleet.add_bulb(bulb_cfg).await {
                 log::warn!("Auto-hydrate bulb connect issue: {e}");
+            }
+            if sync_excluded {
+                state.fleet.set_sync_excluded(&id, true).await;
             }
         }
     }
@@ -910,8 +971,17 @@ async fn save_fleet_config(
     };
 
     let fleet_bulbs = state.fleet.list_bulbs().await;
-    if records.is_empty() && !fleet_bulbs.is_empty() {
-        for b in &fleet_bulbs {
+    for b in &fleet_bulbs {
+        if let Some(rec) = records.iter_mut().find(|r| r.id == b.id) {
+            rec.sync_excluded = b.sync_excluded;
+            if b.name.is_some() {
+                rec.name = b.name.clone();
+            }
+            rec.ip = b.address.clone();
+            if b.mac.is_some() {
+                rec.mac = b.mac.clone();
+            }
+        } else {
             records.push(SavedDeviceRecord {
                 name: b.name.clone(),
                 id: b.id.clone(),
@@ -920,6 +990,7 @@ async fn save_fleet_config(
                 version: "3.5".to_string(),
                 bulb_type: Some(b.bulb_type),
                 mac: b.mac.clone(),
+                sync_excluded: b.sync_excluded,
             });
         }
     }
@@ -952,6 +1023,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/bulbs/save-config", post(save_fleet_config))
         .route("/api/bulbs/:id", patch(rename_bulb).delete(remove_bulb))
         .route("/api/bulbs/:id/power", post(set_bulb_power))
+        .route("/api/bulbs/:id/sync", post(set_bulb_sync))
         .route("/api/bulbs/:id/color", post(set_bulb_color))
         .route("/api/bulbs/:id/white", post(set_bulb_white))
         .route("/api/bulbs/broadcast/power", post(broadcast_power))
@@ -975,6 +1047,7 @@ async fn beat_sync_background_worker(state: AppState) {
     let sample_rate = 44100;
     let window_size = 512;
     let mut audio_opt: Option<AudioStream> = None;
+    let mut sample_accumulator: Vec<f32> = Vec::with_capacity(window_size * 4);
     let mut detector = BeatDetector::new(window_size, sample_rate as f32, DspConfig::default());
     let mut choreographer = Choreographer::new(15, ColorPalette::Cyberpunk);
     let mut imax_engine = ImaxEngine::new(ImaxConfig::default());
@@ -1023,6 +1096,7 @@ async fn beat_sync_background_worker(state: AppState) {
             if was_running {
                 was_running = false;
                 audio_opt = None;
+                sample_accumulator.clear();
                 state.fleet.broadcast_exit_music_mode().await;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1039,6 +1113,7 @@ async fn beat_sync_background_worker(state: AppState) {
         // 2. If running in IMAX Mode from Web Dashboard
         if settings.engine_mode == ActiveEngineMode::Imax {
             audio_opt = None;
+            sample_accumulator.clear();
             imax_engine.cfg.display_index = settings.imax_display;
             imax_engine.cfg.target_fps = settings.imax_fps.clamp(8, 30);
             imax_engine.cfg.smoothing = settings.imax_smoothing;
@@ -1119,6 +1194,7 @@ async fn beat_sync_background_worker(state: AppState) {
         let dev_name = settings.audio_device.clone();
         if audio_opt.is_none() || dev_name != current_device_name {
             current_device_name = dev_name.clone();
+            sample_accumulator.clear();
             match AudioStream::new(dev_name.as_deref(), sample_rate, 8192) {
                 Ok(stream) => {
                     log::info!("Audio capture stream started for beat sync");
@@ -1136,37 +1212,21 @@ async fn beat_sync_background_worker(state: AppState) {
         tokio::time::sleep(Duration::from_millis(15)).await;
 
         if let Some(ref mut audio) = audio_opt {
-            let samples = audio.read_samples_focused(window_size, settings.focus_mode);
-            if samples.len() >= window_size {
-                if let Some(event) = detector.process_frame(&samples) {
-                    if let Some(cmd) = choreographer.handle_event(&event) {
-                        let (r, g, b) = cmd.color.to_rgb();
+            let chunk = audio.read_samples_focused(window_size, settings.focus_mode);
+            sample_accumulator.extend(chunk);
 
-                        let telemetry = WsTelemetry {
-                            engine_mode: ActiveEngineMode::BeatSync,
-                            imax_cli_active: false,
-                            is_kick: cmd.is_kick,
-                            is_snare: cmd.is_snare,
-                            is_vocal_onset: event.is_vocal_onset,
-                            has_instruments: event.instrument_presence.has_instruments,
-                            instrument_score: event.instrument_presence.instrument_score,
-                            active_gradual: cmd.is_gradual,
-                            current_db: event.current_db,
-                            gate_open: event.gate_open,
-                            bass_intensity: event.bass_intensity,
-                            snare_intensity: event.snare_intensity,
-                            instrument_intensity: event.instrument_intensity,
-                            vocal_intensity: event.vocal_intensity,
-                            overall_energy: event.overall_energy,
-                            active_hue: cmd.color.h,
-                            active_brightness: cmd.brightness,
-                            active_rgb: (r, g, b),
-                            agc_gain: detector.current_gain(),
-                            effective_color_frequency: choreographer.effective_color_frequency(),
-                            effective_color_interval_ms: choreographer.effective_color_interval_ms(),
-                        };
+            // Never let latency drift beyond 3 windows (~35ms max buffer)
+            if sample_accumulator.len() > window_size * 3 {
+                let excess = sample_accumulator.len() - window_size * 2;
+                sample_accumulator.drain(..excess);
+            }
 
-                        let _ = state.ws_tx.send(telemetry);
+            let hop_size = window_size / 2;
+            while sample_accumulator.len() >= window_size {
+                let frame = &sample_accumulator[..window_size];
+                if let Some(event) = detector.process_frame(frame) {
+                    let cmd_opt = choreographer.handle_event(&event);
+                    if let Some(ref cmd) = cmd_opt {
                         if event.gate_open {
                             state
                                 .fleet
@@ -1179,7 +1239,58 @@ async fn beat_sync_background_worker(state: AppState) {
                                 .await;
                         }
                     }
+
+                    let (active_color, active_brightness, is_gradual, is_kick, is_snare) = match cmd_opt {
+                        Some(ref cmd) => (cmd.color, cmd.brightness, cmd.is_gradual, cmd.is_kick, cmd.is_snare),
+                        None => {
+                            let live_bri = if event.gate_open {
+                                (event.overall_energy * settings.master_brightness * 1000.0)
+                                    .round()
+                                    .clamp(20.0, 1000.0) as u32
+                            } else {
+                                match settings.ambience_mode {
+                                    BulbAmbienceMode::DarkMode => 0,
+                                    BulbAmbienceMode::LightMode => (settings.master_brightness * 450.0).round() as u32,
+                                }
+                            };
+                            (
+                                choreographer.current_color(),
+                                live_bri,
+                                choreographer.smooth_transitions(),
+                                event.is_kick,
+                                event.is_snare,
+                            )
+                        }
+                    };
+                    let (r, g, b) = active_color.to_rgb();
+
+                    let telemetry = WsTelemetry {
+                        engine_mode: ActiveEngineMode::BeatSync,
+                        imax_cli_active: false,
+                        is_kick,
+                        is_snare,
+                        is_vocal_onset: event.is_vocal_onset,
+                        has_instruments: event.instrument_presence.has_instruments,
+                        instrument_score: event.instrument_presence.instrument_score,
+                        active_gradual: is_gradual,
+                        current_db: event.current_db,
+                        gate_open: event.gate_open,
+                        bass_intensity: event.bass_intensity,
+                        snare_intensity: event.snare_intensity,
+                        instrument_intensity: event.instrument_intensity,
+                        vocal_intensity: event.vocal_intensity,
+                        overall_energy: event.overall_energy,
+                        active_hue: active_color.h,
+                        active_brightness: active_brightness,
+                        active_rgb: (r, g, b),
+                        agc_gain: detector.current_gain(),
+                        effective_color_frequency: choreographer.effective_color_frequency(),
+                        effective_color_interval_ms: choreographer.effective_color_interval_ms(),
+                    };
+
+                    let _ = state.ws_tx.send(telemetry);
                 }
+                sample_accumulator.drain(..hop_size);
             }
         }
     }
@@ -1242,6 +1353,7 @@ async fn add_bulb(
                     version: ver,
                     bulb_type: Some(btype),
                     mac: mac.clone(),
+                    sync_excluded: false,
                 });
             }
             let _ = save_devices_json(&state.devices_path, &records);
@@ -1254,6 +1366,7 @@ async fn add_bulb(
                 power: bulb.is_power_on(),
                 bulb_type: btype,
                 mac,
+                sync_excluded: false,
             }))
         }
         Err(e) => Err((axum::http::StatusCode::BAD_REQUEST, e.to_string())),
@@ -1317,6 +1430,44 @@ async fn set_bulb_power(
     } else {
         Json(serde_json::json!({ "success": false, "error": "bulb not found" }))
     }
+}
+
+#[derive(Deserialize)]
+struct SyncExclusionPayload {
+    excluded: Option<bool>,
+}
+
+async fn set_bulb_sync(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    payload: Option<Json<SyncExclusionPayload>>,
+) -> Json<serde_json::Value> {
+    let excluded = match payload {
+        Some(Json(p)) => match p.excluded {
+            Some(val) => {
+                state.fleet.set_sync_excluded(&id, val).await;
+                val
+            }
+            None => state.fleet.toggle_sync_excluded(&id).await,
+        },
+        None => state.fleet.toggle_sync_excluded(&id).await,
+    };
+
+    let mut records = load_devices_json(&state.devices_path);
+    if let Some(rec) = records.iter_mut().find(|r| r.id == id) {
+        rec.sync_excluded = excluded;
+        let _ = save_devices_json(&state.devices_path, &records);
+    }
+    let bulbs_path = std::path::Path::new("bulbs.json");
+    if state.devices_path != bulbs_path && bulbs_path.exists() {
+        let mut b_records = load_devices_json(bulbs_path);
+        if let Some(rec) = b_records.iter_mut().find(|r| r.id == id) {
+            rec.sync_excluded = excluded;
+            let _ = save_devices_json(bulbs_path, &b_records);
+        }
+    }
+
+    Json(serde_json::json!({ "success": true, "id": id, "sync_excluded": excluded }))
 }
 
 #[derive(Deserialize)]
@@ -1856,6 +2007,61 @@ mod tests {
         assert!(json_val["timestamp"].is_string());
 
         let _ = std::fs::remove_file("bulbs.json");
+        let _ = std::fs::remove_file("devices_test.json");
+    }
+
+    #[tokio::test]
+    async fn test_bulb_sync_exclusion_api() {
+        let state = test_app_state();
+        let mut app = build_router(state);
+
+        // Explicit set to excluded = true
+        let payload = serde_json::json!({
+            "excluded": true
+        });
+
+        let response = app
+            .call(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/bulbs/test_bulb_01/sync")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json_val: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json_val["success"], true);
+        assert_eq!(json_val["id"], "test_bulb_01");
+        assert_eq!(json_val["sync_excluded"], true);
+
+        // Toggle via empty body or None
+        let response = app
+            .call(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/bulbs/test_bulb_01/sync")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json_val: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json_val["success"], true);
+        assert_eq!(json_val["id"], "test_bulb_01");
+        assert_eq!(json_val["sync_excluded"], false);
+
         let _ = std::fs::remove_file("devices_test.json");
     }
 }

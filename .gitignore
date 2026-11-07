@@ -3,3 +3,4 @@
 *.DS_Store
 devices.json
 bulbs.json
+.imax_runtime.json

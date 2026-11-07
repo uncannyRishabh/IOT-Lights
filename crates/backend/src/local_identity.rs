@@ -16,6 +16,8 @@ pub struct SavedDeviceRecord {
     pub bulb_type: Option<tuya_bulb::BulbType>,
     #[serde(default)]
     pub mac: Option<String>,
+    #[serde(default)]
+    pub sync_excluded: bool,
 }
 
 fn default_version() -> String {

@@ -1,5 +1,6 @@
 //! DSP Beat, Instrument, and Vocal Separation Engine using Real-to-Complex FFT,
-//! Online 2D Harmonic-Percussive Source Separation (HPSS), and Formant Crest Analysis.
+//! Online 2D Harmonic-Percussive Source Separation (HPSS), Formant Crest Analysis,
+//! and Volume-Invariant Log-Spectral Flux ("SuperFlux") Beat Tracking.
 
 use std::sync::Arc;
 use num_complex::Complex;
@@ -113,7 +114,7 @@ pub struct BeatEvent {
     pub instrument_intensity: f32,
     /// Normalized isolated vocal harmonic formant energy (0.0 to 1.0)
     pub vocal_intensity: f32,
-    /// Overall spectral flux / dynamics change (0.0 to 1.0)
+    /// Overall sound level + spectral dynamics envelope (0.0 to 1.0)
     pub overall_energy: f32,
     /// Raw calculated spectral flux value
     pub spectral_flux: f32,
@@ -145,11 +146,11 @@ pub struct DspConfig {
 impl Default for DspConfig {
     fn default() -> Self {
         Self {
-            kick_threshold_multiplier: 1.42,
-            snare_threshold_multiplier: 1.50,
-            min_kick_energy: 3.2,
-            min_snare_energy: 6.5,
-            decay_alpha: 0.06,
+            kick_threshold_multiplier: 1.38,
+            snare_threshold_multiplier: 1.44,
+            min_kick_energy: 2.8,
+            min_snare_energy: 5.5,
+            decay_alpha: 0.055,
             auto_normalize: true,
             noise_gate_db: -45.0,
             sensitivity: 1.0,
@@ -161,7 +162,6 @@ impl Default for DspConfig {
 /// Fast median of 7 floats without heap allocation.
 #[inline]
 fn median7(mut arr: [f32; 7]) -> f32 {
-    // Partial insertion sort up to index 3
     for i in 1..7 {
         let key = arr[i];
         let mut j = i;
@@ -174,7 +174,7 @@ fn median7(mut arr: [f32; 7]) -> f32 {
     arr[3]
 }
 
-/// Real-time FFT spectral flux + Online 2D HPSS beat, instrument, and vocal detector.
+/// Real-time FFT spectral flux + Online 2D HPSS + SuperFlux Rhythm & Beat Detector.
 pub struct BeatDetector {
     fft: Arc<dyn RealToComplex<f32>>,
     window_size: usize,
@@ -191,6 +191,16 @@ pub struct BeatDetector {
     moving_snare_avg: f32,
     moving_inst_avg: f32,
     moving_vocal_avg: f32,
+    /// Log-compressed spectral flux state for volume-invariant beat/onset tracking ("SuperFlux")
+    prev_log_bass: f32,
+    prev_log_snare: f32,
+    prev_log_vocal: f32,
+    ema_bass_flux: f32,
+    ema_snare_flux: f32,
+    ema_vocal_flux: f32,
+    frames_since_kick: u32,
+    frames_since_snare: u32,
+    frames_since_vocal: u32,
     rolling_inst_score: f32,
     has_instruments_latched: bool,
     instrument_hold_frames: u32,
@@ -229,6 +239,15 @@ impl BeatDetector {
             moving_snare_avg: 1.0,
             moving_inst_avg: 1.5,
             moving_vocal_avg: 1.0,
+            prev_log_bass: 0.0,
+            prev_log_snare: 0.0,
+            prev_log_vocal: 0.0,
+            ema_bass_flux: 0.06,
+            ema_snare_flux: 0.06,
+            ema_vocal_flux: 0.05,
+            frames_since_kick: 100,
+            frames_since_snare: 100,
+            frames_since_vocal: 100,
             rolling_inst_score: 0.0,
             has_instruments_latched: false,
             instrument_hold_frames: 0,
@@ -279,7 +298,7 @@ impl BeatDetector {
         self.gate_open
     }
 
-    /// Process a frame of PCM audio samples using Online 2D HPSS + Formant Crest separation.
+    /// Process a frame of PCM audio samples using Online 2D HPSS + SuperFlux Beat Tracking.
     pub fn process_frame(&mut self, samples: &[f32]) -> Option<BeatEvent> {
         if samples.len() < self.window_size {
             return None;
@@ -304,6 +323,9 @@ impl BeatDetector {
             for frame in &mut self.spec_history {
                 frame.fill(0.0);
             }
+            self.prev_log_bass = 0.0;
+            self.prev_log_snare = 0.0;
+            self.prev_log_vocal = 0.0;
             self.has_instruments_latched = false;
             self.instrument_hold_frames = 0;
             self.rolling_inst_score = 0.0;
@@ -424,8 +446,13 @@ impl BeatDetector {
             let mag_harmonic = mag * mask_harmonic;
             let mag_percussive = mag * mask_percussive;
 
-            // Half-wave rectified spectral flux
-            let diff = mag - self.prev_spectrum[i];
+            // Log-compressed spectral flux ("SuperFlux") with 3-bin neighbor max suppression
+            let prev_neighbor_max = self.prev_spectrum[i.saturating_sub(1)]
+                .max(self.prev_spectrum[i])
+                .max(self.prev_spectrum[(i + 1).min(spec_len - 1)]);
+            let log_cur = (1.0 + 8.0 * mag).ln();
+            let log_prev = (1.0 + 8.0 * prev_neighbor_max).ln();
+            let diff = log_cur - log_prev;
             if diff > 0.0 {
                 total_flux += diff;
             }
@@ -453,8 +480,6 @@ impl BeatDetector {
         }
 
         // Compute Formant Harmonic Crest Factor (Peak-to-Mean ratio in 260-3200Hz)
-        // Human voice has discrete harmonic spikes (high crest >= 3.2), whereas broadband noise,
-        // snares, or dense multi-string chords have flatter mid spectra (low crest).
         let vocal_band_mean = if vocal_band_bins > 0 {
             vocal_band_sum / vocal_band_bins as f32
         } else {
@@ -465,36 +490,36 @@ impl BeatDetector {
         } else {
             1.0
         };
-        // Normalize crest factor into a tonal confidence weight [0.15 .. 1.0]
         let tonal_specificity = ((vocal_crest - 1.6) / 3.8).clamp(0.15, 1.0);
 
-        // Apply cross-inhibition so drums/bass/broadband chords never masquerade as vocals
         let raw_inst_energy =
             sub_bass_energy * 1.35 + percussive_mid_energy * 1.45 + high_inst_energy * 1.25;
         let raw_vocal_tonal = harmonic_vocal_energy * tonal_specificity;
 
-        // Vocal Purity Ratio: high only when harmonic formant energy dominates over sub-bass & percussive hits
         let vocal_purity = if raw_vocal_tonal + raw_inst_energy > 1e-4 {
             (raw_vocal_tonal / (raw_vocal_tonal + 1.15 * raw_inst_energy)).clamp(0.0, 1.0)
         } else {
             0.0
         };
 
-        // Final isolated stem energies after Focus Mode & mutual exclusivity gating
         let (isolated_inst_energy, isolated_vocal_energy) = match self.config.focus_mode {
             AudioFocusMode::VocalsOnly => (0.0, raw_vocal_tonal * (0.45 + 0.55 * vocal_purity)),
             AudioFocusMode::InstrumentsOnly => (raw_inst_energy, 0.0),
             AudioFocusMode::FullMix => {
                 let v_clean = raw_vocal_tonal * vocal_purity.powf(0.85);
-                // When pure vocals dominate (vocal_purity > 0.60), suppress residual mid bleed in instrument meter
                 let inst_bleed_guard = (1.0 - (vocal_purity - 0.45).max(0.0) * 1.4).clamp(0.15, 1.0);
                 let i_clean = raw_inst_energy * inst_bleed_guard;
                 (i_clean, v_clean)
             }
         };
 
-        // 6. Adaptive Moving Averages & Thresholding
+        // 6. Volume-Invariant Log-Flux Onset Detection + Refractory Cooldown
+        // Prevents continuous false triggers on sustained loud passages while catching every real beat!
         let alpha = self.config.decay_alpha;
+        let prev_bass_avg = self.moving_bass_avg.max(0.2);
+        let prev_snare_avg = self.moving_snare_avg.max(0.2);
+        let prev_vocal_avg = self.moving_vocal_avg.max(0.2);
+
         self.moving_bass_avg = (1.0 - alpha) * self.moving_bass_avg + alpha * sub_bass_energy;
         self.moving_snare_avg =
             (1.0 - alpha) * self.moving_snare_avg + alpha * percussive_mid_energy;
@@ -503,26 +528,65 @@ impl BeatDetector {
         self.moving_vocal_avg =
             (1.0 - alpha) * self.moving_vocal_avg + alpha * isolated_vocal_energy.max(0.5);
 
-        let sens_curve = sens.powf(0.70);
-        let kick_thresh =
-            self.moving_bass_avg * (self.config.kick_threshold_multiplier / sens_curve);
-        let snare_thresh =
-            self.moving_snare_avg * (self.config.snare_threshold_multiplier / sens_curve);
-        let vocal_thresh = self.moving_vocal_avg * (1.28 / sens_curve);
+        // Log-compressed band energy relative to slow moving average
+        let log_bass = (1.0 + 14.0 * (sub_bass_energy / prev_bass_avg)).ln();
+        let log_snare = (1.0 + 14.0 * (percussive_mid_energy / prev_snare_avg)).ln();
+        let log_vocal = (1.0 + 12.0 * (isolated_vocal_energy / prev_vocal_avg)).ln();
+
+        // First-order positive derivative (transient attack flux, 0 during steady loudness!)
+        let bass_attack_flux = (log_bass - self.prev_log_bass).max(0.0);
+        let snare_attack_flux = (log_snare - self.prev_log_snare).max(0.0);
+        let vocal_attack_flux = (log_vocal - self.prev_log_vocal).max(0.0);
+
+        self.prev_log_bass = 0.65 * log_bass + 0.35 * self.prev_log_bass;
+        self.prev_log_snare = 0.65 * log_snare + 0.35 * self.prev_log_snare;
+        self.prev_log_vocal = 0.70 * log_vocal + 0.30 * self.prev_log_vocal;
+
+        self.ema_bass_flux = 0.88 * self.ema_bass_flux + 0.12 * bass_attack_flux;
+        self.ema_snare_flux = 0.88 * self.ema_snare_flux + 0.12 * snare_attack_flux;
+        self.ema_vocal_flux = 0.88 * self.ema_vocal_flux + 0.12 * vocal_attack_flux;
+
+        self.frames_since_kick = self.frames_since_kick.saturating_add(1);
+        self.frames_since_snare = self.frames_since_snare.saturating_add(1);
+        self.frames_since_vocal = self.frames_since_vocal.saturating_add(1);
+
+        // Sensitivity scales threshold gently (dampened exponent 0.38 so 2.6x doesn't over-trigger on noise)
+        let sens_scale = sens.powf(0.38);
+        let kick_energy_ratio = sub_bass_energy / prev_bass_avg;
+        let snare_energy_ratio = percussive_mid_energy / prev_snare_avg;
+        let vocal_energy_ratio = isolated_vocal_energy / prev_vocal_avg;
 
         let is_kick = self.config.focus_mode != AudioFocusMode::VocalsOnly
-            && sub_bass_energy > kick_thresh
-            && sub_bass_energy > (self.config.min_kick_energy / sens);
+            && self.frames_since_kick >= 8 // ~130ms minimum refractory window between kicks
+            && sub_bass_energy > (self.config.min_kick_energy / sens)
+            && kick_energy_ratio > (self.config.kick_threshold_multiplier / sens_scale)
+            && bass_attack_flux > (self.ema_bass_flux * 1.35 + 0.09) / sens_scale;
+
+        if is_kick {
+            self.frames_since_kick = 0;
+        }
 
         let is_snare = self.config.focus_mode != AudioFocusMode::VocalsOnly
-            && percussive_mid_energy > snare_thresh
+            && self.frames_since_snare >= 7 // ~115ms minimum refractory window between snares
             && percussive_mid_energy > (self.config.min_snare_energy / sens)
+            && snare_energy_ratio > (self.config.snare_threshold_multiplier / sens_scale)
+            && snare_attack_flux > (self.ema_snare_flux * 1.40 + 0.10) / sens_scale
             && vocal_purity < 0.45;
 
+        if is_snare {
+            self.frames_since_snare = 0;
+        }
+
         let is_vocal_onset = self.config.focus_mode != AudioFocusMode::InstrumentsOnly
-            && isolated_vocal_energy > vocal_thresh
+            && self.frames_since_vocal >= 10
             && isolated_vocal_energy > (3.2 / sens)
+            && (vocal_energy_ratio > (1.26 / sens_scale)
+                || vocal_attack_flux > (self.ema_vocal_flux * 1.30 + 0.08) / sens_scale)
             && vocal_purity >= 0.42;
+
+        if is_vocal_onset {
+            self.frames_since_vocal = 0;
+        }
 
         // Normalized [0.0 .. 1.0] telemetry intensities
         let bass_intensity =
@@ -571,6 +635,11 @@ impl BeatDetector {
             }
         };
 
+        // Sound level envelope combining dB loudness above noise gate + transient flux
+        let db_norm = ((current_db - self.config.noise_gate_db) / 32.0).clamp(0.0, 1.0);
+        let flux_norm = ((total_flux * sens_scale) / 95.0).clamp(0.0, 1.0);
+        let overall_energy = (db_norm * 0.55 + flux_norm * 0.45).clamp(0.0, 1.0);
+
         Some(BeatEvent {
             is_kick,
             is_snare,
@@ -579,7 +648,7 @@ impl BeatDetector {
             snare_intensity,
             instrument_intensity,
             vocal_intensity,
-            overall_energy: ((total_flux * sens) / 380.0).clamp(0.0, 1.0),
+            overall_energy,
             spectral_flux: total_flux,
             current_db,
             gate_open: true,
@@ -635,13 +704,11 @@ mod tests {
         let window_size = 512;
         let mut detector = BeatDetector::new(window_size, sample_rate, DspConfig::default());
 
-        // Prime with quiet room floor
         let quiet = vec![0.01f32; window_size];
         for _ in 0..8 {
             detector.process_frame(&quiet);
         }
 
-        // Synthesize a sustained human vocal vowel (F0 = 440Hz + harmonic overtones at 880Hz, 1320Hz)
         let mut vocal_frame = Vec::with_capacity(window_size);
         for i in 0..window_size {
             let t = i as f32 / sample_rate;
@@ -652,7 +719,6 @@ mod tests {
         }
 
         let mut last_event = None;
-        // Feed 7 frames so Online 2D HPSS temporal median locks onto the sustained vocal harmonics
         for _ in 0..7 {
             last_event = detector.process_frame(&vocal_frame);
         }

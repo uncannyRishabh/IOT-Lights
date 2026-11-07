@@ -1709,11 +1709,11 @@
     const vocalSpring = new SpringValue(0.05, 160, 16, 1);
     const cameraFovSpring = new SpringValue(60, 240, 20, 1);
 
-    // 5 Parameter-Driven Background Mesh Physics Springs
+    // Parameter-Driven & "Water on a Woofer" Faraday Standing-Wave Springs
     const meshFreqSpring = new SpringValue(0.13, 200, 18, 1);
     const waveGainSpring = new SpringValue(1.0, 200, 18, 1);
-    const flowVelSpring = new SpringValue(1.35, 180, 16, 1);
-    const swirlTurbSpring = new SpringValue(0.55, 180, 16, 1);
+    const flowVelSpring = new SpringValue(1.15, 180, 16, 1);
+    const wooferBeatSpring = new SpringValue(0.0, 340, 17, 1); // Underdamped woofer cone spring for beat peaks/troughs
     const masterLumSpring = new SpringValue(1.0, 180, 16, 1);
     const stemBiasSpring = new SpringValue(0.0, 200, 18, 1);
     let colorLerpRate = 10.0;
@@ -1752,15 +1752,12 @@
 
     function updateMeshConstraints() {
       const sens = Math.max(0.20, Math.min(3.00, syncSettings.sensitivity || 1.0));
-      meshFreqSpring.target = 0.08 + ((sens - 0.20) / 2.80) * 0.20;
-      waveGainSpring.target = 0.60 + ((sens - 0.20) / 2.80) * 1.60;
+      meshFreqSpring.target = 0.09 + ((sens - 0.20) / 2.80) * 0.14;
+      waveGainSpring.target = 0.70 + ((sens - 0.20) / 2.80) * 1.15;
 
       const spd = Math.max(0.10, Math.min(1.00, syncSettings.transition_speed || 0.65));
-      flowVelSpring.target = 0.40 + ((spd - 0.10) / 0.90) * 2.40;
+      flowVelSpring.target = 0.65 + ((spd - 0.10) / 0.90) * 1.10;
       colorLerpRate = 3.0 + ((spd - 0.10) / 0.90) * 15.0;
-
-      const freq = Math.max(0.10, Math.min(1.00, syncSettings.color_frequency || 0.70));
-      swirlTurbSpring.target = 0.15 + ((freq - 0.10) / 0.90) * 1.50;
 
       const bright = Math.max(0.01, Math.min(1.00, syncSettings.master_brightness || 1.0));
       masterLumSpring.target = 0.15 + ((bright - 0.01) / 0.99) * 0.85;
@@ -1775,7 +1772,7 @@
     }
 
     // =========================================================================
-    // 100% GPU-DRIVEN THREE.JS CUSTOM SHADER VISUALIZER (ZERO CPU VERTEX LOOPS!)
+    // 100% GPU-DRIVEN THREE.JS "WATER ON A WOOFER" SHADER VISUALIZER
     // =========================================================================
     const canvas = document.getElementById('threeCanvas');
     const renderer = new THREE.WebGLRenderer({
@@ -1794,12 +1791,15 @@
     camera.position.set(0, -18, 14);
     camera.rotation.x = 0.95;
 
-    // 1. GPU Terrain ShaderMaterial (All wave displacement & shockwave rings run in Vertex Shader!)
-    const segs = isMobile ? 48 : 84;
+    // 1. GPU Terrain ShaderMaterial ("Water on a Woofer": Sound Level drives fluid motion, Beats drive peaks/troughs!)
+    const segs = isMobile ? 52 : 88;
     const terrainGeo = new THREE.PlaneGeometry(86, 86, segs, segs);
 
     const terrainUniforms = {
-      uTime: { value: 0.0 },
+      uWaterPhase: { value: 0.0 },        // Pre-integrated on CPU from Sound Level (zero phase jumps!)
+      uBeatRipplePhase: { value: 0.0 },   // Pre-integrated outward radial wave phase from Beats
+      uSoundLevel: { value: 0.12 },       // Smoothed Sound Level (RMS + energy)
+      uWooferExcursion: { value: 0.08 },  // Beat-driven vertical peak/trough cone excursion
       uInstrument: { value: 0.1 },
       uVocal: { value: 0.05 },
       uKickImpulse: { value: 0.0 },
@@ -1807,8 +1807,6 @@
       uShockIntensity: { value: 0.0 },
       uMeshFrequency: { value: 0.13 },
       uWaveGain: { value: 1.0 },
-      uFlowVelocity: { value: 1.35 },
-      uSwirlTurbulence: { value: 0.55 },
       uMasterLuminance: { value: 1.0 },
       uStemGeometryBias: { value: 0.0 },
       uColorPrimary: { value: new THREE.Color(0x00F0FF) },
@@ -1818,19 +1816,19 @@
     };
 
     const terrainVertexShader = `
-      uniform float uTime;
+      uniform float uWaterPhase;
+      uniform float uBeatRipplePhase;
+      uniform float uSoundLevel;
+      uniform float uWooferExcursion;
       uniform float uInstrument;
       uniform float uVocal;
       uniform float uKickImpulse;
       uniform float uShockRadius;
       uniform float uShockIntensity;
-      /* Parameter-Driven Constraint Uniforms */
-      uniform float uMeshFrequency;     // Driven by Onset Sensitivity (0.08 .. 0.28)
-      uniform float uWaveGain;          // Driven by Onset Sensitivity (0.60 .. 2.20)
-      uniform float uFlowVelocity;      // Driven by Transition Speed (0.40 .. 2.80)
-      uniform float uSwirlTurbulence;   // Driven by Color Change Frequency (0.15 .. 1.65)
-      uniform float uMasterLuminance;   // Driven by Master Brightness (0.15 .. 1.00)
-      uniform float uStemGeometryBias;  // -1.0 = Vocal Radial, 0.0 = FullMix, +1.0 = Instrument Grid
+      uniform float uMeshFrequency;
+      uniform float uWaveGain;
+      uniform float uMasterLuminance;
+      uniform float uStemGeometryBias;
 
       varying float vElevation;
       varying float vDist;
@@ -1838,29 +1836,40 @@
       void main() {
         vec3 pos = position;
         float dist = length(pos.xy);
+        float angle = atan(pos.y, pos.x);
         vDist = dist;
 
-        float phase = uTime * uFlowVelocity;
-        float gridWave = sin(pos.x * uMeshFrequency + phase) * cos(pos.y * uMeshFrequency + phase * 0.85);
-        float radialWave = sin(dist * (uMeshFrequency * 1.35) - phase * 1.2) * cos(atan(pos.y, pos.x) * 3.0 + phase * 0.5);
+        // 1. Continuous fluid wave motion driven by Sound Level (via pre-integrated uWaterPhase -> zero jitter!)
+        float gridFlow = sin(pos.x * uMeshFrequency + uWaterPhase) * cos(pos.y * uMeshFrequency + uWaterPhase * 0.86);
+        float radialFlow = sin(dist * (uMeshFrequency * 1.28) - uWaterPhase * 1.15) * cos(angle * 3.0 + uWaterPhase * 0.45);
 
         float vocalWeight = clamp(-uStemGeometryBias, 0.0, 1.0);
         float instWeight  = clamp(uStemGeometryBias, 0.0, 1.0);
-        float baseWave = mix(
-          mix(gridWave, radialWave, 0.35),
-          radialWave,
-          vocalWeight * 0.75
+        float fluidSurface = mix(
+          mix(gridFlow, radialFlow, 0.38),
+          radialFlow,
+          vocalWeight * 0.72
         );
-        baseWave = mix(baseWave, gridWave, instWeight * 0.75);
+        fluidSurface = mix(fluidSurface, gridFlow, instWeight * 0.72);
 
-        float interference = sin(pos.x * (uMeshFrequency * 2.1) - phase * uSwirlTurbulence + pos.y * 0.19) * (0.35 + uSwirlTurbulence * 0.35);
-        float amp = (0.95 + uInstrument * 3.6 + uKickImpulse * 2.2) * (0.45 + uMasterLuminance * 0.65) * uWaveGain;
-        float z = baseWave * amp + interference * (0.7 + uVocal * 2.4);
+        // Capillary shimmer scaled by live Sound Level
+        float capillary = sin(pos.x * 0.25 - uWaterPhase * 1.25 + pos.y * 0.21) * (0.20 + uSoundLevel * 0.65 + uVocal * 0.85);
 
+        // 2. "Water on a Woofer" Faraday Standing-Wave Peaks & Troughs (Driven by the Beat!)
+        float wooferMembrane = cos(dist * 0.22 - uBeatRipplePhase) * cos(angle * 4.0) * exp(-dist * 0.020);
+        float standingNodes = sin(pos.x * 0.17) * sin(pos.y * 0.17);
+        float beatPeakAmp = (uWooferExcursion * 2.4 + uInstrument * 2.6 + uKickImpulse * 2.5) * uWaveGain;
+        float beatStandingWave = (wooferMembrane * 0.65 + standingNodes * 0.35) * beatPeakAmp;
+
+        float soundWaveAmp = (0.75 + uSoundLevel * 1.65) * uWaveGain;
+        float z = (fluidSurface * soundWaveAmp + capillary + beatStandingWave) * (0.45 + uMasterLuminance * 0.65);
+
+        // 3. Concentric shockwave ring on hard kick drum hits
         if (uShockRadius > 0.01) {
           float ringDiff = abs(dist - uShockRadius);
-          if (ringDiff < 5.0) {
-            z += (1.0 - ringDiff / 5.0) * uShockIntensity;
+          if (ringDiff < 5.5) {
+            float ringProfile = cos((ringDiff / 5.5) * 1.570796);
+            z += ringProfile * uShockIntensity;
           }
         }
 
@@ -2005,6 +2014,9 @@
 
     let shockwaveRadius = 0.0;
     let shockwaveIntensity = 0.0;
+    let waterPhase = 0.0;
+    let beatRipplePhase = 0.0;
+    let smoothedSoundLevel = 0.12;
     let lastRenderTime = performance.now();
     let frameCount = 0;
     let lastFpsTime = performance.now();
@@ -2034,19 +2046,41 @@
       }
 
       const elapsed = clock.getElapsedTime();
+
+      // 1. Smoothly track Sound Level (RMS dB above gate + overall_energy) -> drives fluid wave movement speed
+      const gateFloor = syncSettings.noise_gate_db || -45.0;
+      const dbAboveGate = (isSyncing && telemetry.gate_open)
+        ? Math.max(0, Math.min(1, (telemetry.current_db - gateFloor) / 32.0))
+        : 0.0;
+      const targetSoundLevel = isSyncing
+        ? Math.max(0.08, Math.min(1.0, dbAboveGate * 0.60 + (telemetry.overall_energy || 0) * 0.40))
+        : 0.12;
+      smoothedSoundLevel += (targetSoundLevel - smoothedSoundLevel) * (1.0 - Math.exp(-9.0 * dt));
+
+      // Integrate waterPhase incrementally from Sound Level (never teleports when parameters change!)
+      waterPhase += dt * (0.48 + smoothedSoundLevel * 2.35) * (0.65 + flowVelSpring.value * 0.35);
+
+      // 2. Beat-Driven "Water on a Woofer" Excursion (peaks & troughs punch on kicks, bass & snares)
+      const beatTransient = isSyncing
+        ? Math.min(1.35, (telemetry.bass_intensity || 0) * 0.85 + (telemetry.snare_intensity || 0) * 0.55)
+        : 0.08;
+      wooferBeatSpring.target = beatTransient;
       instSpring.target = isSyncing ? telemetry.instrument_intensity : 0.12;
       vocalSpring.target = isSyncing ? telemetry.vocal_intensity : 0.08;
 
       kickSpring.step(dt);
+      wooferBeatSpring.step(dt);
       instSpring.step(dt);
       vocalSpring.step(dt);
       cameraFovSpring.step(dt);
       meshFreqSpring.step(dt);
       waveGainSpring.step(dt);
       flowVelSpring.step(dt);
-      swirlTurbSpring.step(dt);
       masterLumSpring.step(dt);
       stemBiasSpring.step(dt);
+
+      // Advance radial woofer ripple phase on beats
+      beatRipplePhase += dt * (1.10 + Math.max(0, wooferBeatSpring.value) * 3.8 + kickSpring.value * 1.8);
 
       const stops = getActivePaletteStops();
       if (isSyncing || telemetry.imax_cli_active) {
@@ -2055,8 +2089,7 @@
         targetSecondaryColor.copy(samplePaletteStop(stops, 1));
         targetTertiaryColor.copy(samplePaletteStop(stops, 2));
       } else {
-        const cycleSpeed = 0.12 * (0.5 + swirlTurbSpring.value * 0.5);
-        const cyclePos = (elapsed * cycleSpeed) % stops.length;
+        const cyclePos = (elapsed * 0.12) % stops.length;
         const idx0 = Math.floor(cyclePos);
         const idx1 = (idx0 + 1) % stops.length;
         const frac = cyclePos - idx0;
@@ -2084,7 +2117,10 @@
       }
 
       // Update GPU Uniforms only (0 CPU vertex loops!)
-      terrainUniforms.uTime.value = elapsed;
+      terrainUniforms.uWaterPhase.value = waterPhase;
+      terrainUniforms.uBeatRipplePhase.value = beatRipplePhase;
+      terrainUniforms.uSoundLevel.value = smoothedSoundLevel;
+      terrainUniforms.uWooferExcursion.value = Math.max(0, wooferBeatSpring.value);
       terrainUniforms.uInstrument.value = instSpring.value;
       terrainUniforms.uVocal.value = vocalSpring.value;
       terrainUniforms.uKickImpulse.value = kickSpring.value;
@@ -2092,8 +2128,6 @@
       terrainUniforms.uShockIntensity.value = shockwaveIntensity;
       terrainUniforms.uMeshFrequency.value = meshFreqSpring.value;
       terrainUniforms.uWaveGain.value = waveGainSpring.value;
-      terrainUniforms.uFlowVelocity.value = flowVelSpring.value;
-      terrainUniforms.uSwirlTurbulence.value = swirlTurbSpring.value;
       terrainUniforms.uMasterLuminance.value = masterLumSpring.value;
       terrainUniforms.uStemGeometryBias.value = stemBiasSpring.value;
       terrainUniforms.uColorPrimary.value.copy(currentPrimaryColor);
@@ -2104,7 +2138,7 @@
       particleUniforms.uTime.value = elapsed;
       particleUniforms.uColorPrimary.value.copy(currentPrimaryColor);
       particleUniforms.uColorSecondary.value.copy(currentSecondaryColor);
-      particleUniforms.uEnergy.value = isSyncing ? telemetry.overall_energy : 0.15;
+      particleUniforms.uEnergy.value = smoothedSoundLevel;
       particleUniforms.uMasterLuminance.value = masterLumSpring.value;
 
       renderer.render(scene, camera);
@@ -2321,15 +2355,14 @@
           document.getElementById('liveDbMeterTick').style.left = `${normDb * 100}%`;
           document.getElementById('noiseGateVal').innerText = `${syncSettings.noise_gate_db.toFixed(0)} dB (Live: ${data.current_db.toFixed(1)} dB)`;
 
-          // Auto Color Frequency Live HUD & Spring Target Animation
+          // Auto Color Frequency Live HUD (decoupled from terrain mesh so changes never jitter the visualizer!)
           if (syncSettings.transition_mode === 'Auto' && typeof data.effective_color_frequency === 'number') {
             const pct = Math.round(data.effective_color_frequency * 100);
             const ms = data.effective_color_interval_ms || Math.round(320 - 225 * data.effective_color_frequency);
-            const tag = pct > 65 ? 'DENSE BEATS' : (pct < 35 ? 'AMBIENT/VOCAL' : 'BALANCED');
+            const tag = pct > 65 ? 'FAST BEAT' : (pct < 35 ? 'SLOW / VOCAL' : 'GROOVE');
             document.getElementById('colorFreqVal').innerText = `AUTO: ${pct}% (${ms}ms • ${tag})`;
             document.getElementById('colorFreqFill').style.setProperty('--fill-pct', `${pct}%`);
             document.getElementById('colorFreqSlider').value = pct;
-            swirlTurbSpring.target = 0.15 + (pct / 100) * 1.50;
           }
 
           updateAutoClassifierHud(data);
@@ -2751,9 +2784,14 @@
                 </div>
                 <div class="bulb-meta">${b.address} • ${b.bulb_type}${macStr}</div>
               </div>
-              <span class="status-badge ${b.is_connected ? 'online' : 'offline'}">
-                ● ${b.is_connected ? 'Online' : 'Offline'}
-              </span>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span class="status-badge ${b.sync_excluded ? 'offline' : 'online'}" style="${b.sync_excluded ? 'background:rgba(245,158,11,0.15); color:#F59E0B; border:1px solid rgba(245,158,11,0.3);' : ''}">
+                  ${b.sync_excluded ? '⏸ Excluded' : '⚡ Sync Active'}
+                </span>
+                <span class="status-badge ${b.is_connected ? 'online' : 'offline'}">
+                  ● ${b.is_connected ? 'Online' : 'Offline'}
+                </span>
+              </div>
             </div>
             <div class="bulb-actions">
               <div class="bulb-power-toggle-wrap">
@@ -2765,6 +2803,11 @@
               </div>
 
               <div style="display:flex; align-items:center; gap:8px;">
+                <button onclick="toggleBulbSync('${b.id}')" class="btn btn-ghost btn-sm" 
+                        style="${b.sync_excluded ? 'color:#F59E0B; border-color:rgba(245,158,11,0.3);' : 'color:#10B981;'}" 
+                        title="${b.sync_excluded ? 'Click to re-include bulb in music & screen sync' : 'Click to exclude bulb from music & screen sync'}">
+                  ${b.sync_excluded ? '⚡ Include in Sync' : '⏸ Exclude from Sync'}
+                </button>
                 <button onclick="openColorWheelForBulb('${b.id}', '${name.replace(/'/g, "\\'")}')" class="btn btn-ghost btn-sm" title="Open Full 360° HSV &amp; White Color Wheel">
                   🎨 Color &amp; White Wheel
                 </button>
@@ -2775,6 +2818,14 @@
         `;
       }).join('');
     }
+
+    window.toggleBulbSync = async (id) => {
+      await fetch(`/api/bulbs/${id}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      loadBulbs();
+    };
 
     window.startRenameBulb = (id, curName) => {
       const newName = prompt(`Enter friendly name for bulb ${id}:`, curName);

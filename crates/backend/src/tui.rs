@@ -14,12 +14,13 @@ use crate::{
 };
 use beat_sync::{BulbConfig, FleetBulbInfo};
 use rustuya_tokio::Discovery;
-use tuya_bulb::{BulbType, ColorFormat};
+use tuya_bulb::{BulbColor, BulbType, ColorFormat};
 
 struct TerminalGuard;
 
 impl TerminalGuard {
     fn enter() -> anyhow::Result<Self> {
+        crate::set_tui_running(true);
         terminal::enable_raw_mode()?;
         let mut out = stdout();
         execute!(out, EnterAlternateScreen, cursor::Hide)?;
@@ -34,6 +35,7 @@ impl Drop for TerminalGuard {
         let _ = execute!(out, cursor::Show, LeaveAlternateScreen);
         let _ = terminal::disable_raw_mode();
         let _ = out.flush();
+        crate::set_tui_running(false);
     }
 }
 
@@ -54,6 +56,32 @@ struct DiscoveredBulb {
     name: String,
     version: String,
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct PredefinedColor {
+    pub name: &'static str,
+    pub hue: f32,
+    pub sat: f32,
+    pub val: f32,
+    pub is_white: bool,
+    pub temp: u32,
+}
+
+pub const PREDEFINED_COLORS: &[PredefinedColor] = &[
+    PredefinedColor { name: "Neon Cyan", hue: 180.0, sat: 1.0, val: 1.0, is_white: false, temp: 0 },
+    PredefinedColor { name: "Electric Blue", hue: 220.0, sat: 1.0, val: 1.0, is_white: false, temp: 0 },
+    PredefinedColor { name: "Deep Violet", hue: 270.0, sat: 1.0, val: 1.0, is_white: false, temp: 0 },
+    PredefinedColor { name: "Hot Magenta", hue: 320.0, sat: 1.0, val: 1.0, is_white: false, temp: 0 },
+    PredefinedColor { name: "Laser Red", hue: 0.0, sat: 1.0, val: 1.0, is_white: false, temp: 0 },
+    PredefinedColor { name: "Sunset Orange", hue: 28.0, sat: 1.0, val: 1.0, is_white: false, temp: 0 },
+    PredefinedColor { name: "Amber Gold", hue: 45.0, sat: 1.0, val: 1.0, is_white: false, temp: 0 },
+    PredefinedColor { name: "Acid Yellow", hue: 60.0, sat: 1.0, val: 1.0, is_white: false, temp: 0 },
+    PredefinedColor { name: "Neon Lime", hue: 90.0, sat: 1.0, val: 1.0, is_white: false, temp: 0 },
+    PredefinedColor { name: "Emerald Green", hue: 135.0, sat: 1.0, val: 1.0, is_white: false, temp: 0 },
+    PredefinedColor { name: "Warm White (2700K)", hue: 35.0, sat: 0.2, val: 1.0, is_white: true, temp: 100 },
+    PredefinedColor { name: "Natural White (4000K)", hue: 45.0, sat: 0.1, val: 1.0, is_white: true, temp: 500 },
+    PredefinedColor { name: "Cool White (6500K)", hue: 200.0, sat: 0.1, val: 1.0, is_white: true, temp: 1000 },
+];
 
 /// Runs the interactive 24-bit Truecolor terminal visualizer and controller.
 pub async fn run_tui(state: AppState) -> anyhow::Result<()> {
@@ -87,6 +115,17 @@ pub async fn run_tui(state: AppState) -> anyhow::Result<()> {
     let mut flash_notice: Option<(String, Instant)> = None;
     let mut pairing = PairingState::default();
     let mut frame_tick: u64 = 0;
+    let mut selected_bulb_idx: Option<usize> = None;
+    let mut selected_color_idx: usize = 0;
+
+    const PALETTES: [beat_sync::ColorPalette; 6] = [
+        beat_sync::ColorPalette::Cyberpunk,
+        beat_sync::ColorPalette::Synthwave,
+        beat_sync::ColorPalette::ClubRave,
+        beat_sync::ColorPalette::Vaporwave,
+        beat_sync::ColorPalette::AmbientChill,
+        beat_sync::ColorPalette::Custom,
+    ];
 
     let mut render_buf = String::with_capacity(8192);
 
@@ -104,11 +143,150 @@ pub async fn run_tui(state: AppState) -> anyhow::Result<()> {
                         handle_pairing_input(&mut pairing, key.code, &state).await;
                     } else {
                         match key.code {
-                            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                            KeyCode::Char('q') | KeyCode::Char('Q') => {
                                 break;
+                            }
+                            KeyCode::Esc => {
+                                if selected_bulb_idx.is_some() {
+                                    selected_bulb_idx = None;
+                                } else {
+                                    break;
+                                }
                             }
                             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 break;
+                            }
+                            KeyCode::Left => {
+                                // Cycle predefined colors backward (for selected bulb or whole fleet)
+                                selected_color_idx = if selected_color_idx == 0 {
+                                    PREDEFINED_COLORS.len() - 1
+                                } else {
+                                    selected_color_idx - 1
+                                };
+                                let c = &PREDEFINED_COLORS[selected_color_idx];
+                                let bulbs = state.fleet.list_bulbs().await;
+
+                                if let Some(idx) = selected_bulb_idx {
+                                    if idx < bulbs.len() {
+                                        let b = &bulbs[idx];
+                                        let bname = b.name.as_deref().unwrap_or("Bulb");
+                                        if let Some(device) = state.fleet.get_bulb(&b.id).await {
+                                            if c.is_white {
+                                                let _ = device.set_white(1000, c.temp).await;
+                                            } else {
+                                                let _ = device.set_color(BulbColor::from_hsv(c.hue, c.sat, c.val)).await;
+                                            }
+                                        }
+                                        flash_notice = Some((
+                                            format!("🎨 [{}] Color: {}", bname, c.name).to_uppercase(),
+                                            Instant::now(),
+                                        ));
+                                    }
+                                } else {
+                                    if c.is_white {
+                                        state.fleet.broadcast_white(1000, c.temp).await;
+                                    } else {
+                                        state.fleet.broadcast_color(BulbColor::from_hsv(c.hue, c.sat, c.val)).await;
+                                    }
+                                    flash_notice = Some((
+                                        format!("🎨 Fleet Color: {}", c.name).to_uppercase(),
+                                        Instant::now(),
+                                    ));
+                                }
+                            }
+                            KeyCode::Right => {
+                                // Cycle predefined colors forward (for selected bulb or whole fleet)
+                                selected_color_idx = (selected_color_idx + 1) % PREDEFINED_COLORS.len();
+                                let c = &PREDEFINED_COLORS[selected_color_idx];
+                                let bulbs = state.fleet.list_bulbs().await;
+
+                                if let Some(idx) = selected_bulb_idx {
+                                    if idx < bulbs.len() {
+                                        let b = &bulbs[idx];
+                                        let bname = b.name.as_deref().unwrap_or("Bulb");
+                                        if let Some(device) = state.fleet.get_bulb(&b.id).await {
+                                            if c.is_white {
+                                                let _ = device.set_white(1000, c.temp).await;
+                                            } else {
+                                                let _ = device.set_color(BulbColor::from_hsv(c.hue, c.sat, c.val)).await;
+                                            }
+                                        }
+                                        flash_notice = Some((
+                                            format!("🎨 [{}] Color: {}", bname, c.name).to_uppercase(),
+                                            Instant::now(),
+                                        ));
+                                    }
+                                } else {
+                                    if c.is_white {
+                                        state.fleet.broadcast_white(1000, c.temp).await;
+                                    } else {
+                                        state.fleet.broadcast_color(BulbColor::from_hsv(c.hue, c.sat, c.val)).await;
+                                    }
+                                    flash_notice = Some((
+                                        format!("🎨 Fleet Color: {}", c.name).to_uppercase(),
+                                        Instant::now(),
+                                    ));
+                                }
+                            }
+                            KeyCode::Char('c') | KeyCode::Char('C') => {
+                                // Cycle Beat Sync color palette
+                                let mut settings = state.settings.write().await;
+                                let cur = settings.palette;
+                                let idx = PALETTES.iter().position(|&p| p == cur).unwrap_or(0);
+                                let next_idx = (idx + 1) % PALETTES.len();
+                                settings.palette = PALETTES[next_idx];
+                                flash_notice = Some((
+                                    format!("🎵 Palette: {:?}", settings.palette).to_uppercase(),
+                                    Instant::now(),
+                                ));
+                            }
+                            KeyCode::Up => {
+                                // Navigate fleet bulb selection upward
+                                let bulbs = state.fleet.list_bulbs().await;
+                                if !bulbs.is_empty() {
+                                    selected_bulb_idx = Some(match selected_bulb_idx {
+                                        Some(i) => if i == 0 { bulbs.len() - 1 } else { i - 1 },
+                                        None => bulbs.len() - 1,
+                                    });
+                                }
+                            }
+                            KeyCode::Down => {
+                                // Navigate fleet bulb selection downward
+                                let bulbs = state.fleet.list_bulbs().await;
+                                if !bulbs.is_empty() {
+                                    selected_bulb_idx = Some(match selected_bulb_idx {
+                                        Some(i) => (i + 1) % bulbs.len(),
+                                        None => 0,
+                                    });
+                                }
+                            }
+                            KeyCode::Char('x') | KeyCode::Char('X') => {
+                                // Toggle sync exclusion for selected bulb and save to disk
+                                let bulbs = state.fleet.list_bulbs().await;
+                                if let Some(idx) = selected_bulb_idx {
+                                    if idx < bulbs.len() {
+                                        let b = &bulbs[idx];
+                                        let excluded = state.fleet.toggle_sync_excluded(&b.id).await;
+                                        let _ = save_fleet_to_disk(&state).await;
+                                        let bname = b.name.as_deref().unwrap_or("Bulb");
+                                        if excluded {
+                                            flash_notice = Some((
+                                                format!("⏸ {} EXCLUDED from sync (saved)", bname),
+                                                Instant::now(),
+                                            ));
+                                        } else {
+                                            flash_notice = Some((
+                                                format!("⚡ {} INCLUDED in sync (saved)", bname),
+                                                Instant::now(),
+                                            ));
+                                        }
+                                    }
+                                } else {
+                                    flash_notice = Some((
+                                        "Use ↑/↓ to select a bulb, then [X] to toggle sync exclusion".to_string(),
+                                        Instant::now(),
+                                    ));
+                                }
                             }
                             KeyCode::Char('m') | KeyCode::Char('M') => {
                                 // Toggle Mode
@@ -141,15 +319,31 @@ pub async fn run_tui(state: AppState) -> anyhow::Result<()> {
                                 }
                             }
                             KeyCode::Char(' ') => {
-                                // Toggle Fleet Power
+                                // Toggle power for selected bulb, or all if none selected
                                 let bulbs = state.fleet.list_bulbs().await;
-                                let any_on = bulbs.iter().any(|b| b.power);
-                                if any_on {
-                                    state.fleet.broadcast_turn_off().await;
-                                    flash_notice = Some(("Fleet Power OFF".to_string(), Instant::now()));
+                                if let Some(idx) = selected_bulb_idx {
+                                    if idx < bulbs.len() {
+                                        let b = &bulbs[idx];
+                                        let bname = b.name.as_deref().unwrap_or("Bulb");
+                                        if let Some(device) = state.fleet.get_bulb(&b.id).await {
+                                            if b.power {
+                                                let _ = device.turn_off().await;
+                                                flash_notice = Some((format!("{} Power OFF", bname), Instant::now()));
+                                            } else {
+                                                let _ = device.turn_on().await;
+                                                flash_notice = Some((format!("{} Power ON", bname), Instant::now()));
+                                            }
+                                        }
+                                    }
                                 } else {
-                                    state.fleet.broadcast_turn_on().await;
-                                    flash_notice = Some(("Fleet Power ON".to_string(), Instant::now()));
+                                    let any_on = bulbs.iter().any(|b| b.power);
+                                    if any_on {
+                                        state.fleet.broadcast_turn_off().await;
+                                        flash_notice = Some(("Fleet Power OFF".to_string(), Instant::now()));
+                                    } else {
+                                        state.fleet.broadcast_turn_on().await;
+                                        flash_notice = Some(("Fleet Power ON".to_string(), Instant::now()));
+                                    }
                                 }
                             }
                             KeyCode::Char('s') | KeyCode::Char('S') => {
@@ -246,6 +440,8 @@ pub async fn run_tui(state: AppState) -> anyhow::Result<()> {
             &latest_telemetry,
             &flash_notice,
             &pairing,
+            selected_bulb_idx,
+            selected_color_idx,
             frame_tick,
         );
 
@@ -334,6 +530,7 @@ async fn handle_pairing_input(pairing: &mut PairingState, code: KeyCode, state: 
                                     version: target.version.clone(),
                                     bulb_type: Some(BulbType::TypeB),
                                     mac: target.mac.clone(),
+                                    sync_excluded: false,
                                 });
                             }
                             let bulbs_json_path = std::path::Path::new("bulbs.json");
@@ -367,6 +564,7 @@ async fn save_fleet_to_disk(state: &AppState) -> anyhow::Result<usize> {
     // Persist to bulbs.json in current directory, preserving existing keys and adding new bulbs
     for b in &fleet_bulbs {
         if let Some(rec) = records.iter_mut().find(|r| r.id == b.id) {
+            rec.sync_excluded = b.sync_excluded;
             if b.name.is_some() {
                 rec.name = b.name.clone();
             }
@@ -383,6 +581,7 @@ async fn save_fleet_to_disk(state: &AppState) -> anyhow::Result<usize> {
                 version: "3.5".to_string(),
                 bulb_type: Some(b.bulb_type),
                 mac: b.mac.clone(),
+                sync_excluded: b.sync_excluded,
             });
         }
     }
@@ -405,7 +604,9 @@ fn render_tui_view(
     t: &WsTelemetry,
     flash: &Option<(String, Instant)>,
     pairing: &PairingState,
-    tick: u64,
+    selected_idx: Option<usize>,
+    selected_color_idx: usize,
+    _tick: u64,
 ) {
     let w = (cols as usize).max(80);
 
@@ -414,6 +615,9 @@ fn render_tui_view(
         ActiveEngineMode::BeatSync => "\x1b[1;30;42m [🎵 BEAT SYNC] \x1b[0m",
         ActiveEngineMode::Imax => "\x1b[1;30;45m [🎬 IMAX MODE] \x1b[0m",
     };
+
+    let palette_name = format!("{:?}", settings.palette).to_uppercase();
+    let palette_badge = format!("\x1b[1;37;48;2;147;51;234m [🎨 {}] \x1b[0m", palette_name);
 
     let online_count = bulbs.iter().filter(|b| b.is_connected).count();
     let fleet_badge = format!(
@@ -430,6 +634,8 @@ fn render_tui_view(
 
     buf.push_str("\x1b[1;37;48;2;15;23;42m  IOT-BULB SYNC v3.0  \x1b[0m ");
     buf.push_str(mode_pill);
+    buf.push(' ');
+    buf.push_str(&palette_badge);
     buf.push(' ');
     buf.push_str(&fleet_badge);
     buf.push_str(" | ");
@@ -473,24 +679,48 @@ fn render_tui_view(
         let (r, g, b) = t.active_rgb;
 
         // 2. 24-Bit Truecolor Waveform Spectrum Bar (32 columns)
-        buf.push_str("24-BIT TRUECOLOR SPECTRUM:\r\n  ");
+        buf.push_str("24-BIT TRUECOLOR SPECTRUM (Real-Time Audio Stem Lockstep):\x1b[K\r\n  ");
         for col in 0..32 {
-            let phase = (tick as f32 * 0.12) + (col as f32 * 0.28);
-            let wave = ((phase.sin() * 0.5 + 0.5) * (0.3 + t.overall_energy * 0.7)).clamp(0.0, 1.0);
-            let char_block = if wave > 0.75 {
-                "█"
-            } else if wave > 0.50 {
-                "▓"
-            } else if wave > 0.25 {
-                "▒"
+            let band_val = if col < 8 {
+                let frac = col as f32 / 7.0;
+                let kick_boost = if t.is_kick { 0.45 } else { 0.0 };
+                (t.bass_intensity * (0.8 + 0.2 * (1.0 - frac)) + kick_boost).clamp(0.0, 1.0)
+            } else if col < 16 {
+                let frac = (col - 8) as f32 / 7.0;
+                let mid_boost = t.instrument_score * 0.2;
+                (t.instrument_intensity * (0.85 + 0.15 * frac.sin()) + mid_boost).clamp(0.0, 1.0)
+            } else if col < 24 {
+                let frac = (col - 16) as f32 / 7.0;
+                let vocal_boost = if t.is_vocal_onset { 0.35 } else { 0.0 };
+                (t.vocal_intensity * (0.80 + 0.20 * (1.0 - frac)) + vocal_boost).clamp(0.0, 1.0)
             } else {
-                "░"
+                let snare_boost = if t.is_snare { 0.45 } else { 0.0 };
+                (t.snare_intensity * 0.75 + t.overall_energy * 0.25 + snare_boost).clamp(0.0, 1.0)
             };
 
-            // Interpolate color along column
-            let cr = (r as f32 * (0.45 + 0.55 * wave)).clamp(0.0, 255.0) as u8;
-            let cg = (g as f32 * (0.45 + 0.55 * wave)).clamp(0.0, 255.0) as u8;
-            let cb = (b as f32 * (0.45 + 0.55 * wave)).clamp(0.0, 255.0) as u8;
+            let val = if t.gate_open { band_val } else { band_val * 0.12 };
+
+            let char_block = if val > 0.85 {
+                "█"
+            } else if val > 0.70 {
+                "▇"
+            } else if val > 0.55 {
+                "▆"
+            } else if val > 0.40 {
+                "▅"
+            } else if val > 0.25 {
+                "▄"
+            } else if val > 0.12 {
+                "▃"
+            } else if val > 0.04 {
+                "▂"
+            } else {
+                " "
+            };
+
+            let hue_shift = (col as f32 / 31.0 - 0.5) * 60.0;
+            let col_hue = (t.active_hue + hue_shift).rem_euclid(360.0);
+            let (cr, cg, cb) = hsv_to_rgb(col_hue, 0.95, (0.35 + 0.65 * val).clamp(0.0, 1.0));
 
             buf.push_str(&format!("\x1b[38;2;{};{};{}m{}\x1b[0m", cr, cg, cb, char_block));
         }
@@ -530,40 +760,104 @@ fn render_tui_view(
             vocal_bar, vocal_pct, auto_freq_str
         ));
 
-        // 4. Fleet Status Rail
-        buf.push_str("\x1b[1;37mCONFIGURED FLEET:\x1b[0m\x1b[K\r\n");
+        // 4. Fleet Status Rail with Viewport Scrolling
+        let total = bulbs.len();
+        let page_size = 6;
+        let start_idx = if let Some(sel) = selected_idx {
+            if sel >= page_size {
+                sel.saturating_sub(page_size - 1)
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+        let end_idx = (start_idx + page_size).min(total);
+
+        let active_c = &PREDEFINED_COLORS[selected_color_idx % PREDEFINED_COLORS.len()];
+        let (cr, cg, cb) = if active_c.is_white {
+            (255, 245, 230)
+        } else {
+            hsv_to_rgb(active_c.hue, active_c.sat, active_c.val)
+        };
+
+        buf.push_str(&format!(
+            "\x1b[1;37mCONFIGURED FLEET ({}/{} shown | ↑/↓ Select, ←/→ Color, [Space] Power, [X] Exclude):\x1b[0m\x1b[K\r\n",
+            if total > 0 { end_idx - start_idx } else { 0 },
+            total
+        ));
+
         if bulbs.is_empty() {
             buf.push_str("  \x1b[90m(No bulbs configured. Press [P] to scan LAN & pair)\x1b[0m\x1b[K\r\n");
         } else {
-            for b in bulbs.iter().take(4) {
+            for (i, b) in bulbs.iter().enumerate().skip(start_idx).take(page_size) {
+                let is_selected = selected_idx == Some(i);
+                let sel_mark = if is_selected { "\x1b[1;33m▶\x1b[0m " } else { "  " };
+
                 let status_icon = if b.is_connected {
                     "\x1b[32m● CONNECTED\x1b[0m"
                 } else {
                     "\x1b[31m○ OFFLINE\x1b[0m"
                 };
-                let power_icon = if b.power { "\x1b[33m⚡ ON\x1b[0m" } else { "\x1b[90m○ OFF\x1b[0m" };
+                let power_icon = if b.power { "\x1b[33m⚡ ON\x1b[0m " } else { "\x1b[90m○ OFF\x1b[0m" };
+                let sync_badge = if b.sync_excluded {
+                    "\x1b[1;33m⏸ EXCLUDED\x1b[0m"
+                } else {
+                    "\x1b[1;36m⚡ SYNCING\x1b[0m"
+                };
+
                 let name = b.name.as_deref().unwrap_or("Smart Bulb");
+                let name_formatted = if is_selected {
+                    format!("\x1b[1;37;48;2;30;41;59m {:<22} \x1b[0m", name)
+                } else {
+                    format!("{:<24}", name)
+                };
+
                 buf.push_str(&format!(
-                    "  {:<22} {:<15} {:<14} {}\x1b[K\r\n",
-                    name, b.address, status_icon, power_icon
+                    "{}{} {:<15} {:<13} {:<8} {}\x1b[K\r\n",
+                    sel_mark, name_formatted, b.address, status_icon, power_icon, sync_badge
                 ));
             }
         }
+
+        // Active Color / Bulb selection hint rail
+        buf.push_str("\r\n");
+        if let Some(sel) = selected_idx {
+            if sel < bulbs.len() {
+                let bname = bulbs[sel].name.as_deref().unwrap_or("Bulb");
+                buf.push_str(&format!(
+                    "  \x1b[1;33m▶ BULB TARGET:\x1b[0m \x1b[1;37m{}\x1b[0m  |  \x1b[48;2;{};{};{}m  \x1b[0m \x1b[1;36mColor: {}\x1b[0m  \x1b[90m(←/→ cycle color, [Space] power, [X] exclude, [Esc] deselect)\x1b[0m\x1b[K\r\n",
+                    bname, cr, cg, cb, active_c.name
+                ));
+            }
+        } else {
+            buf.push_str(&format!(
+                "  \x1b[1;37mFLEET COLOR:\x1b[0m  \x1b[48;2;{};{};{}m  \x1b[0m \x1b[1;36m{}\x1b[0m  \x1b[90m(←/→ broadcast color to all, ↑/↓ select bulb, [C] Beat Sync palette)\x1b[0m\x1b[K\r\n",
+                cr, cg, cb, active_c.name
+            ));
+        }
     }
 
-    // 5. Flash Notification
+    // 5. Flash Notification or Recent Log
     buf.push_str("\r\n");
     if let Some((msg, _)) = flash {
         buf.push_str(&format!("\x1b[1;33;48;2;30;41;59m  {}  \x1b[0m\x1b[K\r\n", msg));
+    } else if let Some(last_log) = crate::get_latest_log() {
+        let max_len = w.saturating_sub(12);
+        let truncated = if last_log.len() > max_len {
+            format!("{}...", &last_log[..max_len])
+        } else {
+            last_log
+        };
+        buf.push_str(&format!("\x1b[90m  LOG: {}\x1b[0m\x1b[K\r\n", truncated));
     } else {
         buf.push_str("\x1b[K\r\n");
     }
 
-
     // 6. Interactive Hotkey Bar (Bottom Row)
     buf.push_str(&format!("{}\x1b[K\r\n", "─".repeat(w)));
     buf.push_str("\x1b[1;37;48;2;15;23;42m");
-    buf.push_str(" [M] Mode  [D] Display  [P] Pair/Scan LAN  [S] Save bulbs.json  [Space] Power  [Q/Esc] Quit ");
+    buf.push_str(" [↑/↓] Select Bulb  [←/→] Color  [Space] Power  [X] Sync Exclude  [C] Palette  [M] Mode  [D] Display  [P] Pair  [S] Save  [Q] Quit ");
     buf.push_str("\x1b[0m\x1b[K\r\n");
 }
 
@@ -575,4 +869,129 @@ fn render_progress_bar(val: f32, len: usize) -> String {
         "█".repeat(filled),
         "░".repeat(empty)
     )
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
+    let c = v * s;
+    let hp = (h.rem_euclid(360.0)) / 60.0;
+    let x = c * (1.0 - (hp.rem_euclid(2.0) - 1.0).abs());
+    let m = v - c;
+    let (r1, g1, b1) = if hp < 1.0 {
+        (c, x, 0.0)
+    } else if hp < 2.0 {
+        (x, c, 0.0)
+    } else if hp < 3.0 {
+        (0.0, c, x)
+    } else if hp < 4.0 {
+        (0.0, x, c)
+    } else if hp < 5.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+    (
+        ((r1 + m) * 255.0).round().clamp(0.0, 255.0) as u8,
+        ((g1 + m) * 255.0).round().clamp(0.0, 255.0) as u8,
+        ((b1 + m) * 255.0).round().clamp(0.0, 255.0) as u8,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_predefined_colors_coverage() {
+        assert!(PREDEFINED_COLORS.len() >= 10);
+        for c in PREDEFINED_COLORS {
+            assert!(!c.name.is_empty());
+            assert!(c.hue >= 0.0 && c.hue <= 360.0);
+            assert!(c.sat >= 0.0 && c.sat <= 1.0);
+            assert!(c.val >= 0.0 && c.val <= 1.0);
+        }
+    }
+
+    #[test]
+    fn test_tui_render_with_scrolling_fleet() {
+        let settings = crate::SyncSettings::default();
+        let telemetry = WsTelemetry {
+            engine_mode: ActiveEngineMode::BeatSync,
+            imax_cli_active: false,
+            is_kick: false,
+            is_snare: false,
+            is_vocal_onset: false,
+            has_instruments: true,
+            instrument_score: 0.8,
+            active_gradual: false,
+            current_db: -24.0,
+            gate_open: true,
+            bass_intensity: 0.5,
+            snare_intensity: 0.3,
+            instrument_intensity: 0.6,
+            vocal_intensity: 0.4,
+            overall_energy: 0.55,
+            active_hue: 180.0,
+            active_brightness: 800,
+            active_rgb: (0, 240, 255),
+            agc_gain: 1.0,
+            effective_color_frequency: 0.70,
+            effective_color_interval_ms: 160,
+        };
+        let pairing = PairingState::default();
+
+        // 1. Render empty fleet
+        let mut buf = String::new();
+        render_tui_view(
+            &mut buf,
+            100,
+            30,
+            &settings,
+            &[],
+            &telemetry,
+            &None,
+            &pairing,
+            None,
+            0,
+            0,
+        );
+        assert!(buf.contains("IOT-BULB SYNC"));
+        assert!(buf.contains("(No bulbs configured"));
+        assert!(buf.contains("FLEET COLOR"));
+
+        // 2. Render large fleet (10 bulbs) with selected index 8 (tests viewport scroll window)
+        let mut bulbs = Vec::new();
+        for i in 0..10 {
+            bulbs.push(FleetBulbInfo {
+                id: format!("bulb_{:02}", i),
+                name: Some(format!("Living Room {:02}", i)),
+                address: format!("192.168.1.{}", 10 + i),
+                is_connected: i % 2 == 0,
+                power: true,
+                bulb_type: tuya_bulb::BulbType::TypeB,
+                mac: None,
+                sync_excluded: i == 3,
+            });
+        }
+
+        buf.clear();
+        render_tui_view(
+            &mut buf,
+            120,
+            30,
+            &settings,
+            &bulbs,
+            &telemetry,
+            &None,
+            &pairing,
+            Some(8),
+            2, // Deep Violet
+            0,
+        );
+
+        assert!(buf.contains("CONFIGURED FLEET (6/10 shown"));
+        assert!(buf.contains("Living Room 08"));
+        assert!(buf.contains("BULB TARGET"));
+        assert!(buf.contains("Color: Deep Violet"));
+        assert!(buf.contains("⏸ EXCLUDED"));
+    }
 }

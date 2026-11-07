@@ -1,4 +1,4 @@
-![IOT-Bulb Sync Hero Banner](poster.png)
+![IOT-Bulb Sync Hero Banner](assets/poster.png)
 
 # IOT-Bulb Sync 💡🎵
 ### Real-Time Music Beat-Sync & IMAX Prominent-Color Screen Controller for Tuya Smart Bulbs • 100% Local LAN
@@ -214,24 +214,44 @@ The dashboard gives you:
 - **Explicit Fleet Persistence**: Click **Save to bulbs.json** in the Fleet Rail header, or use the inline 16-char key field & **+ Pair & Save to JSON** button on any discovered LAN bulb.
 
 ### 4. Interactive Truecolor Terminal Visualizer (TUI)
-Launch the zero-overhead, 30 FPS 24-bit ANSI Truecolor terminal controller:
+Launch the zero-overhead, 24-bit ANSI Truecolor terminal controller:
 ```bash
+# Using cargo:
+cargo run -p backend -- tui
+
+# Or using the compiled binary directly:
 target/release/iot-bulb-sync tui
-# or via startup script:
+
+# Or alongside the web server:
+target/release/iot-bulb-sync serve --tui
+
+# Or via the convenience startup script:
 ./start.sh --tui
 ```
 
-Features:
-- **80×24 ANSI Truecolor Spectrum**: 32-column Unicode waveform bar rendered in live bulb colors and active palette gradients.
-- **Dedicated Hardware Telemetry**: Live meters for `INSTRUMENT`, `VOCAL`, `NOISE GATE`, and `AUTO FREQ (ms / BPM)`.
-- **Fleet Table**: Real-time status for every configured bulb in `bulbs.json`.
-- **Instant Single-Keystroke Hotkeys**:
-  - `[M]` Toggle Beat Sync ↔ IMAX Screen Mode (hot-swaps engine in-place)
-  - `[D]` Cycle Target Display (when in IMAX mode with multiple monitors)
-  - `[P]` Pair / Scan LAN Devices (triggers UDP scan, lists devices, press 1–9 to enter local key)
-  - `[S]` Save Fleet Configuration & Settings atomically to `bulbs.json`
-  - `[Space]` Toggle Fleet Power ON/OFF
-  - `[Q]` / `[Esc]` Quit Gracefully (restores terminal raw mode and cursor)
+#### TUI Features:
+- **Tight-Lockstep 24-Bit Truecolor Spectrum**: 32-column vertical EQ meter computed directly from live DSP frequency bands (sub-bass, mid instruments, vocal formants, and percussive snares) in real-time lockstep without dropped audio buffers.
+- **Stem Isolation Meters**: Live real-time meters for `INSTRUMENT`, `VOCAL`, `NOISE GATE (dBFS)`, and `AUTO FREQ (ms / BPM)`.
+- **Fleet Table with Individual Bulb Selection & Scrolling Viewport**: Navigate your light fleet item-by-item with cursor `▶` and live online/offline/power/sync indicators.
+- **Predefined Color Engine**: Instant arrow navigation cycling through 13 predefined colors & calibrated whites (Neon Cyan, Electric Blue, Deep Violet, Hot Magenta, Laser Red, Sunset Orange, Amber Gold, Acid Yellow, Neon Lime, Emerald Green, Warm White 2700K, Natural White 4000K, Cool White 6500K).
+- **Clobber-Free Protected Status Line**: All asynchronous logs and warnings are buffered into an internal ring buffer and rendered in a dedicated status slot rather than interleaving or corrupting the terminal.
+
+#### TUI Keyboard Controls & Arrow Navigation:
+- **`[↑] / [↓]` (Up / Down Arrows)**: Navigate light fleet to select individual bulbs (with automatic viewport scrolling).
+- **`[←] / [→]` (Left / Right Arrows)**:
+  - **When a bulb is selected**: Instantly cycle and apply **predefined colors** directly to that individual bulb!
+  - **When no bulb is selected**: Cycle and apply predefined colors to the entire fleet simultaneously.
+- **`[Space]`**:
+  - When an individual bulb is highlighted: Toggles power for that specific bulb.
+  - When no bulb is selected: Toggles power for the entire fleet simultaneously.
+- **`[X]`**: Toggle **Sync Exclusion** for the highlighted bulb. Immediately saved to `bulbs.json`. Excluded bulbs (`[⏸ EXCLUDED]`) retain their steady state and are omitted from music sync and screen frames.
+- **`[C]`**: Cycle Beat Sync Color Palettes (`Cyberpunk`, `Synthwave`, `ClubRave`, `Vaporwave`, `AmbientChill`, `Custom`).
+- **`[M]`**: Toggle between **Beat Sync** and **IMAX Screen Mode** on the fly.
+- **`[D]`**: Cycle target displays for IMAX screen sync when multiple monitors are connected.
+- **`[P]`**: Launch LAN UDP discovery (UDP 6666/6667) and interactive pairing wizard. Press `1..9` to enter a 16-character local key and save directly to `bulbs.json`.
+- **`[S]`**: Atomically save current fleet configuration and sync exclusion states to `bulbs.json`.
+- **`[Esc]`**: Deselect active bulb (returns to fleet mode), or exit sub-screen / quit.
+- **`[Q]`**: Quit gracefully (restores raw mode, alternate screen, and cursor).
 
 ### 5. Standalone Beat-Sync & Screen-Sync CLI
 Run sub-10ms native screen compression (`64×36` Quartz/xcap downscaling) with **100% black-pixel rejection** and **Oklab Prominent Color Clustering** across your fleet from `bulbs.json`:
@@ -241,7 +261,9 @@ target/release/iot-bulb-sync imax \
   --fps 20 \
   --smoothing 0.82 \
   --saturation-boost 1.35 \
-  --color-mode prominent
+  --color-mode prominent \
+  --min-brightness 25 \
+  --max-brightness 1000
 
 # Standalone Beat-Sync CLI for a single bulb:
 target/release/iot-bulb-sync sync \
@@ -253,7 +275,7 @@ target/release/iot-bulb-sync sync \
 ```
 
 ### 6. Direct Command-Line Control
-To turn a bulb on/off or change its hue directly:
+To turn a bulb on/off or change its hue directly from the command line:
 ```bash
 # Turn ON and set color to Cyan (Hue 180°)
 target/release/iot-bulb-sync control \
@@ -276,10 +298,13 @@ target/release/iot-bulb-sync control \
   --ip "192.168.1.2" \
   --power false --version 3.5
 ```
-  --color-mode prominent \
-  --min-brightness 25 \
-  --max-brightness 1000
-```
+
+### 7. Sync Exclusion (Multi-Bulb Fleet Choreography)
+You can exclude any bulb in your fleet from music and screen sync at any time:
+- **In CLI / TUI**: Navigate to the bulb with `[↑] / [↓]` and press `[X]`. The bulb badge switches to `[⏸ EXCLUDED]`.
+- **In Web Dashboard**: Click the `⚡ Sync Active` / `⏸ Exclude from Sync` toggle button on the bulb card.
+- **Via REST API**: Send `POST /api/bulbs/:id/sync` with `{ "excluded": true }` (or empty body to toggle).
+- Exclusions are automatically remembered and written to `bulbs.json` upon save.
 
 ---
 
